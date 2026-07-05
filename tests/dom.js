@@ -7,6 +7,10 @@ export function setupDom() {
     const dom = new JSDOM('<!doctype html><html><body></body></html>');
     globalThis.window = dom.window;
     globalThis.document = dom.window.document;
+    // Web-component collections define custom elements: expose the DOM
+    // globals their classes and registration need.
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    globalThis.customElements = dom.window.customElements;
     globalThis.CSS = dom.window.CSS || {};
     if (!globalThis.CSS.escape) {
         // jsdom does not implement CSS.escape; ids are simple (n1, n2…).

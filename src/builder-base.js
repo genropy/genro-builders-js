@@ -25,6 +25,7 @@
  * cardinality validation, sub-builder.
  */
 import { SourceBag, wrapSource, VALUE } from './source-bag.js';
+import { getCollection, injectCollectionCss } from './collections.js';
 
 /** Structural segment that carries the payload source (tree-not-forest). */
 export const SOURCE_ROOT = '_root_';
@@ -277,9 +278,43 @@ export class BuilderBase {
         );
     }
 
-    /** setup → main → (if reactive) arm source reactivity. */
+    /** Declare web-component collections this builder needs. Static
+     *  `wc_requires = [...]` (A) is seeded in create(); `wcRequires()` in
+     *  setup() (B) adds to it. Both resolve before main(). */
+    wcRequires(...names) {
+        if (!this._requiredCollections) {
+            this._requiredCollections = new Set(this.constructor.wc_requires || []);
+        }
+        for (const name of names) {
+            this._requiredCollections.add(name);
+        }
+    }
+
+    /** Fold the required collections' grammar into an own per-page schema
+     *  (additive over the inherited one) and define their custom elements. */
+    _resolveCollections() {
+        if (!this._requiredCollections || this._requiredCollections.size === 0) {
+            return;
+        }
+        const merged = { ...this.schema };
+        for (const name of this._requiredCollections) {
+            const coll = getCollection(name);
+            if (!coll) {
+                throw new Error(`unknown wc collection: '${name}'`);
+            }
+            Object.assign(merged, coll.grammar.elements || coll.grammar);
+            coll.defineComponents();
+            injectCollectionCss(name, coll.css);
+        }
+        this.constructor._classSchema = merged;
+        this.constructor._tagNames = null;
+    }
+
+    /** setup → resolve collections → main → (if reactive) arm reactivity. */
     create() {
+        this._requiredCollections = new Set(this.constructor.wc_requires || []);
         this.setup(this.data);
+        this._resolveCollections();
         this.main(wrapSource(this.source));
         if (this._isReactive) {
             this._sourceroot.subscribe('builder_source', {
