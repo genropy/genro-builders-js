@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>genro-builders-js — reactive genro</title>
+  <!--
+    Serve over http from sub-projects/, e.g.
+      python3 -m http.server 8010 --directory .../sub-projects
+    then open /genro-builders-js/examples/test.html
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "genro-builders-js": "../src/index.js",
+      "genro-bag-js": "../../genro-bag-js/src/index.js",
+      "genro-tytx": "../../genro-tytx/js/src/index.js",
+      "module": "./shims/module.js",
+      "@xmldom/xmldom": "./shims/xmldom.js"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; color: #222; }
+    #root { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; min-height: 3rem; }
+    .toolbar { margin: 1rem 0; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+    button { padding: .4rem .8rem; }
+    input { padding: .3rem .5rem; }
+    .note { color: #666; font-style: italic; }
+    code { background: #f4f4f4; padding: 0 .3rem; border-radius: 3px; }
+    h3 { margin: .8rem 0 .2rem; }
+  </style>
+</head>
+<body>
+  <h2>genro reattivo — dati (^pointer) + struttura (insert/remove)</h2>
+  <p>Ogni azione emette un <b>patch parziale</b> che tocca solo il nodo interessato
+     (dati → <code>replace</code>, struttura → <code>insert</code>/<code>remove</code>).</p>
+
+  <div class="toolbar">
+    <input id="title-input" placeholder="nuovo titolo…">
+    <button id="set-title">setData title</button>
+    <button id="add-item">list.li(…) — insert</button>
+    <button id="del-item">rimuovi ultima — remove</button>
+    <button id="reset">reset</button>
+  </div>
+
+  <div id="root"></div>
+
+  <script type="module">
+    import { Application, HtmlBuilder } from 'genro-builders-js';
+
+    class Page extends HtmlBuilder {
+      setup() {
+        this.setData('page.title', 'Titolo iniziale');
+      }
+      main(root) {
+        const pane = root.div({ datapath: 'page', node_id: 'page' });
+        pane.h1('^.title');
+        pane.p('Lista reattiva (struttura):', { class_: 'note' });
+        const ul = pane.ul({ node_id: 'list' });
+        ul.li('alpha');
+        ul.li('beta');
+      }
+    }
+
+    const page = new Page('main');
+    const genro = new Application(document.getElementById('root'), page);
+    window.genro = genro;
+
+    let n = 0;
+    document.getElementById('set-title').onclick = () => {
+      const v = document.getElementById('title-input').value || ('Titolo ' + (++n));
+      genro.live(() => page.setData('page.title', v));
+    };
+    document.getElementById('add-item').onclick = () =>
+      genro.live(() => page.nodeById('list').li('voce ' + (++n)));
+    document.getElementById('del-item').onclick = () =>
+      genro.live(() => {
+        const ul = page.nodeById('list');
+        const labels = ul.value.getNodes().map((node) => node.label);
+        if (labels.length) ul.value.pop(labels[labels.length - 1]);
+      });
+    document.getElementById('reset').onclick = () => location.reload();
+
+    console.log('genro pronto:', genro);
+  </script>
+</body>
+</html>

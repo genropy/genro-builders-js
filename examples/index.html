@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>genro-builders-js — pages</title>
+  <!--
+    Serve over http from sub-projects/, e.g.
+      python3 -m http.server 8010 --directory .../sub-projects
+    then open /genro-builders-js/examples/index.html
+    Add a page: drop a file in pages/ exporting { title, Page } and list it
+    in PAGES below.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "genro-builders-js": "../src/index.js",
+      "genro-bag-js": "../../genro-bag-js/src/index.js",
+      "genro-tytx": "../../genro-tytx/js/src/index.js",
+      "module": "./shims/module.js",
+      "@xmldom/xmldom": "./shims/xmldom.js"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; color: #222; }
+    #root { border: 1px solid #ccc; border-radius: 6px; padding: 1rem; min-height: 3rem; }
+    .bar { margin: 1rem 0; display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+    button, select, input { padding: .35rem .6rem; }
+    .note { color: #666; font-style: italic; }
+    code { background: #f4f4f4; padding: 0 .3rem; border-radius: 3px; }
+    .pagebar button { margin-right: .3rem; }
+    .tabs { margin-top: 1rem; }
+    .tabbar { display: flex; gap: .25rem; border-bottom: 1px solid #ccc; }
+    .tab { padding: .3rem .8rem; border: 1px solid #ccc; border-bottom: none;
+           background: #f4f4f4; cursor: pointer; border-radius: 4px 4px 0 0; }
+    .tab.active { background: #fff; font-weight: 600; }
+    .tabpanels { border: 1px solid #ccc; border-top: none; }
+    .frame { width: 100%; height: 420px; border: 0; display: block; }
+  </style>
+</head>
+<body>
+  <h2>genro-builders-js — pagine</h2>
+  <p>Ogni pagina è un file in <code>pages/</code> che esporta <code>{ title, Page }</code>.
+     Seleziona una pagina; da console hai <code>genro</code>.</p>
+
+  <div class="bar">
+    <label>Pagina: <select id="page-select"></select></label>
+  </div>
+
+  <div class="bar" id="actions"></div>
+  <div id="root"></div>
+
+  <script type="module">
+    import { Application } from 'genro-builders-js';
+
+    // The page registry: import a module per page, list it here.
+    const PAGES = {
+      launcher: await import('./pages/launcher.js'),
+      basic: await import('./pages/basic.js'),
+      list: await import('./pages/list.js'),
+      form: await import('./pages/form.js'),
+    };
+
+    let rootEl = document.getElementById('root');
+    const select = document.getElementById('page-select');
+    const actions = document.getElementById('actions');
+
+    for (const [key, mod] of Object.entries(PAGES)) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = mod.title || key;
+      select.appendChild(opt);
+    }
+
+    let genro;
+    function mount(key) {
+      const mod = PAGES[key];
+      // Fresh root: drops any listeners a previous page's activate() added.
+      const fresh = rootEl.cloneNode(false);
+      rootEl.replaceWith(fresh);
+      rootEl = fresh;
+      const page = new mod.Page('main');
+      genro = new Application(rootEl, page);
+      window.genro = genro;
+      window.page = page;
+      buildActions(key, page);
+      if (mod.activate) { mod.activate(genro, page); }
+    }
+
+    // Per-page demo actions (kept in the harness, not in the page recipe).
+    function buildActions(key, page) {
+      actions.replaceChildren();
+      const btn = (label, fn) => {
+        const b = document.createElement('button');
+        b.textContent = label; b.onclick = fn; actions.appendChild(b);
+      };
+      if (key === 'basic') {
+        const input = document.createElement('input');
+        input.placeholder = 'nuovo titolo…'; actions.appendChild(input);
+        let n = 0;
+        btn('setData title', () => genro.live(() =>
+          page.setData('page.title', input.value || ('Titolo ' + (++n)))));
+      }
+      if (key === 'list') {
+        let n = 0;
+        btn('list.li(…) — insert', () => genro.live(() =>
+          page.nodeById('list').li('voce ' + (++n))));
+        btn('rimuovi ultima — remove', () => genro.live(() => {
+          const ul = page.nodeById('list');
+          const labels = ul.value.getNodes().map((node) => node.label);
+          if (labels.length) ul.value.pop(labels[labels.length - 1]);
+        }));
+      }
+    }
+
+    select.onchange = () => mount(select.value);
+    mount(select.value);
+  </script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>page</title>
+  <!-- Serves a single page as a standalone document (the iframe src of
+       the launcher's tabs). Usage: page.html?name=<page key>. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "genro-builders-js": "../src/index.js",
+      "genro-bag-js": "../../genro-bag-js/src/index.js",
+      "genro-tytx": "../../genro-tytx/js/src/index.js",
+      "module": "./shims/module.js",
+      "@xmldom/xmldom": "./shims/xmldom.js"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 1rem; color: #222; }
+    .note { color: #666; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import { Application } from 'genro-builders-js';
+
+    const name = new URLSearchParams(location.search).get('name') || 'basic';
+    const mod = await import(`./pages/${name}.js`);
+    const page = new mod.Page('main');
+    const genro = new Application(document.getElementById('root'), page);
+    window.genro = genro;
+    window.page = page;
+    if (mod.activate) { mod.activate(genro, page); }
+  </script>
+</body>
+</html>
