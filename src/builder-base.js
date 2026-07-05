@@ -47,8 +47,21 @@ export class BuilderBase {
 
     // --- grammar -----------------------------------------------------
 
+    /** Build `_classSchema` from a `builder_grammar` doc, merging the
+     *  parent's (the mixin/inheritance chain). Called in a subclass
+     *  `static {}` block — the JS equivalent of Python `__init_subclass__`.
+     *  DIFF-PYTHON: @element/@abstract are data here (the grammar object),
+     *  not decorated methods; @component/@container are registered
+     *  separately (they carry a body). */
+    static defineGrammar(doc) {
+        const parent = Object.getPrototypeOf(this);
+        this._classSchema = { ...(parent._classSchema || {}), ...doc.elements };
+        this._abstracts = { ...(parent._abstracts || {}), ...(doc.abstracts || {}) };
+        this._tagNames = null;
+    }
+
     get schema() {
-        return this.constructor.SCHEMA || {};
+        return this.constructor._classSchema || {};
     }
 
     get schemaTagNames() {
@@ -91,9 +104,12 @@ export class BuilderBase {
 
     setChild(bag, tag, value, attrs) {
         const attributes = { ...attrs };
-        const meta = (this.schema[tag] || {}).meta;
-        if (meta && !('_meta' in attributes)) {
-            attributes._meta = meta;
+        const info = this.schema[tag] || {};
+        if (info._meta && !('_meta' in attributes)) {
+            attributes._meta = info._meta;
+        }
+        if (info.ns && !('ns' in attributes)) {
+            attributes.ns = info.ns;
         }
         const nodePosition = attributes.node_position;
         delete attributes.node_position;

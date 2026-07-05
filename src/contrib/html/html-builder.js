@@ -15,6 +15,7 @@
  */
 import { RendererBase } from '../../renderer/base.js';
 import { BuilderBase } from '../../builder-base.js';
+import { HTML5_GRAMMAR } from './html5-elements.js';
 
 /** HTML5 void elements: rendered without children/closing tag. */
 const VOID_TAGS = new Set([
@@ -27,25 +28,7 @@ export class HtmlBuilder extends BuilderBase {
 
     static _defaultRenderMode = 'html';
 
-    static SCHEMA = {
-        body: { subTags: '*' },
-        div: { subTags: '*' },
-        h1: { subTags: '*' },
-        h2: { subTags: '*' },
-        h3: { subTags: '*' },
-        p: { subTags: '*' },
-        ul: { subTags: 'li' },
-        li: { subTags: '*' },
-        span: { subTags: '*' },
-        a: { subTags: '*' },
-        nav: { subTags: '*' },
-        header: { subTags: '*' },
-        section: { subTags: '*' },
-        button: { subTags: '*' },
-        iframe: { subTags: '' },
-        input: {},
-        br: {},
-    };
+    static { this.defineGrammar(HTML5_GRAMMAR); }   // __init_subclass__ equivalent
 
     get renderer_html() {
         return new HtmlRenderer(this);
