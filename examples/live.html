@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>genro-builders-js — live playground</title>
+  <!--
+    Playground: editor (sinistra) → render live (destra). Tutto LOCALE, zero
+    rete: la preview integrata dell'IDE è sandboxata (nessun host esterno),
+    quindi CodeMirror è vendorizzato in ./vendor/ e i moduli arrivano via
+    import-map con path locali (come gli altri esempi).
+    Servi da sub-projects/ (i moduli fratelli bag-js/tytx stanno lì):
+      python3 -m http.server 8010 --directory .../sub-projects
+    poi apri  http://localhost:8010/genro-builders-js/examples/live.html
+    (file:// non va: gli ES module richiedono http/CORS.)
+  -->
+  <link rel="stylesheet" href="./vendor/codemirror/lib/codemirror.css">
+  <script src="./vendor/codemirror/lib/codemirror.js"></script>
+  <script src="./vendor/codemirror/mode/javascript/javascript.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "genro-builders-js": "../src/index.js",
+      "genro-bag-js": "../../genro-bag-js/src/index.js",
+      "genro-tytx": "../../genro-tytx/js/src/index.js",
+      "module": "./shims/module.js",
+      "@xmldom/xmldom": "./shims/xmldom.js"
+    }
+  }
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { font: 14px/1.5 system-ui, sans-serif; color: #222;
+           display: flex; flex-direction: column; }
+    header { padding: .5rem 1rem; border-bottom: 1px solid #ccc;
+             display: flex; align-items: center; gap: 1rem; flex: none; }
+    header h1 { font-size: 1rem; margin: 0; }
+    header .hint { color: #666; font-style: italic; font-size: .85em; }
+    header button { padding: .35rem .8rem; cursor: pointer; }
+    .split { flex: 1; display: flex; min-height: 0; }
+    .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .pane.left { border-right: 1px solid #ccc; }
+    .pane .label { font-size: .72em; text-transform: uppercase; letter-spacing: .04em;
+                   color: #888; padding: .3rem .6rem; border-bottom: 1px solid #eee; flex: none; }
+    .CodeMirror, .CodeMirror pre {
+      flex: 1; height: auto; font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    #stage { flex: 1; overflow: auto; padding: 1rem; }
+    #errors { flex: none; margin: 0; max-height: 30%; overflow: auto;
+              background: #2b0f10; color: #ff9b9b; padding: .6rem 1rem;
+              font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+    #errors[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>genro-builders-js · live</h1>
+    <span class="hint">la ricetta si riesegue al blur dell'editor o con Ctrl/Cmd-Enter</span>
+    <button id="run">Esegui</button>
+  </header>
+
+  <div class="split">
+    <div class="pane left">
+      <div class="label">ricetta — class Page extends HtmlBuilder</div>
+      <textarea id="editor"></textarea>
+    </div>
+    <div class="pane right">
+      <div class="label">render</div>
+      <div id="stage"></div>
+    </div>
+  </div>
+  <pre id="errors" hidden></pre>
+
+  <script type="module">
+    import { HtmlBuilder, SvgBuilder, Application, wrapSource } from 'genro-builders-js';
+    import { Bag } from 'genro-bag-js';
+    // Register the web-component collections so a recipe can declare them
+    // via `static wc_requires = [...]` (the recipe, compiled with new Function,
+    // cannot import). Side-effect imports: they call registerCollection().
+    import '../src/collections/inputs.js';       // textBox, numberTextBox, dateTextBox, checkbox…
+    import '../src/collections/colorpicker.js';  // colorpicker
+    import '../src/collections/layout.js';       // panel, box (slot containers)
+
+    // The starter recipe: layout web components — a borderContainer (header
+    // top, a resizable menu on the left, a footer bottom, the tabContainer
+    // in the center) and a tabContainer whose SELECTION LIVES IN THE DATA
+    // (`value: '^ui.tab'`). Clicking a tab writes the pointer (same write-back
+    // as the inputs); the footer span reflects it live. The tab panes hold
+    // input widgets with write-back.
+    const STARTER = `class Page extends HtmlBuilder {
+  static wc_requires = ['layout', 'inputs'];
+
+  setup() {
+    this.setData('ui.tab', 'anagrafica');
+    this.setData('cli.nome', 'Mario Rossi');
+    this.setData('cli.email', 'mario@acme.it');
+    this.setData('cli.note', '');
+  }
+
+  main(root) {
+    const bc = root.borderContainer({ design: 'headline',
+      style: 'height:70vh;border:1px solid #cbd5e1;border-radius:6px' });
+
+    // top: header a tutta larghezza
+    bc.div({ slot: 'top', style: 'background:#1e293b;color:#fff;padding:10px 14px' })
+      .h3('Scheda cliente', { style: 'margin:0' });
+
+    // left: menu con splitter trascinabile (ridimensiona la regione)
+    const menu = bc.div({ slot: 'left', splitter: true,
+      style: 'width:170px;background:#f1f5f9;padding:10px' });
+    menu.p('Sezioni', { style: 'font-weight:600;margin:.2rem 0' });
+    menu.p('Anagrafica'); menu.p('Contatti'); menu.p('Note');
+
+    // center (slot di default → nessun attributo slot): il tabContainer,
+    // la scheda attiva vive in ^ui.tab.
+    const tc = bc.tabContainer({ value: '^ui.tab' });
+    tc.tab({ label: 'Anagrafica', key: 'anagrafica' })
+      .textBox({ value: '^cli.nome', lbl: 'Nome', updateOn: 'input' });
+    tc.tab({ label: 'Contatti', key: 'contatti' })
+      .textBox({ value: '^cli.email', lbl: 'Email', updateOn: 'input' });
+    tc.tab({ label: 'Note', key: 'note' })
+      .textBox({ value: '^cli.note', lbl: 'Note', updateOn: 'input' });
+
+    // bottom: footer che RIFLETTE la scheda selezionata (reattivo).
+    // span FRATELLI: un nodo ha valore-testo OPPURE figli, mai entrambi —
+    // '.span("x").span("^y")' scarterebbe "x".
+    const foot = bc.div({ slot: 'bottom',
+      style: 'background:#f8fafc;padding:6px 14px;color:#64748b;font-size:.85em' });
+    foot.span('Scheda selezionata: ');
+    foot.span('^ui.tab');
+  }
+}`;
+
+    const cm = CodeMirror.fromTextArea(document.getElementById('editor'), {
+      mode: 'javascript',
+      lineNumbers: true,
+      indentUnit: 2,
+      tabSize: 2,
+    });
+    cm.setValue(STARTER);
+
+    const stage = document.getElementById('stage');
+    const errBox = document.getElementById('errors');
+
+    function showError(e) {
+      errBox.hidden = false;
+      errBox.textContent = (e && e.stack) || String(e);
+    }
+
+    function run() {
+      const code = cm.getValue();
+      let Page;
+      try {
+        // The recipe defines `class Page extends HtmlBuilder`; compile it with
+        // the builder vocabulary in scope and hand back the class. Same
+        // new Function pattern the data-elements use for func code.
+        const factory = new Function(
+          'HtmlBuilder', 'SvgBuilder', 'Application', 'Bag', 'wrapSource',
+          code + '\n;return Page;',
+        );
+        Page = factory(HtmlBuilder, SvgBuilder, Application, Bag, wrapSource);
+        if (typeof Page !== 'function') {
+          throw new Error("la ricetta deve definire `class Page extends HtmlBuilder`");
+        }
+      } catch (e) {
+        showError(e);
+        return;   // keep the previous render on a compile error
+      }
+      try {
+        // Fresh host each run: the old Application (its own handler/dataroot
+        // and subscriptions) is dropped with the element it mounted.
+        const host = document.createElement('div');
+        stage.replaceChildren(host);
+        const genro = new Application(host, new Page('main'));
+        window.genro = genro;   // console handle
+        window.Page = Page;
+        errBox.hidden = true;
+        errBox.textContent = '';
+      } catch (e) {
+        showError(e);
+      }
+    }
+
+    cm.on('blur', run);
+    cm.setOption('extraKeys', { 'Cmd-Enter': run, 'Ctrl-Enter': run });
+    document.getElementById('run').onclick = run;
+
+    run();   // first paint
+  </script>
+</body>
+</html>
