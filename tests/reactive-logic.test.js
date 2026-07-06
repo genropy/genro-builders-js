@@ -127,6 +127,42 @@ test('data_logic: funcs resolved by name from a separate business-logic class', 
     assert.equal(handler.data.getItem('main.o.total'), 50);   // recomputed
 });
 
+test('func can be a callable passed directly (JS extension)', () => {
+    class CallablePage extends HtmlBuilder {
+        main(root) {
+            const w = root.div({ datapath: 'c' });
+            w.dataSetter({ destination: '.x', value: 4 });
+            w.dataFormula({
+                destination: '.sq', func: (b) => b.x * b.x, x: '^.x', _on_start: true,
+            });
+            w.span('^.sq');
+        }
+    }
+    const handler = mount(CallablePage);
+    assert.equal(handler.data.getItem('main.c.sq'), 16);
+    handler.live(() => handler.data.setItem('main.c.x', 5));
+    assert.equal(handler.data.getItem('main.c.sq'), 25);
+});
+
+test('func can be a JS code string, compiled to a function (JS extension)', () => {
+    class CodePage extends HtmlBuilder {
+        main(root) {
+            const w = root.div({ datapath: 'd' });
+            w.dataSetter({ destination: '.a', value: 3 });
+            w.dataSetter({ destination: '.b', value: 7 });
+            w.dataFormula({
+                destination: '.sum', func: '({ a, b }) => a + b',
+                a: '^.a', b: '^.b', _on_start: true,
+            });
+            w.span('^.sum');
+        }
+    }
+    const handler = mount(CodePage);
+    assert.equal(handler.data.getItem('main.d.sum'), 10);
+    handler.live(() => handler.data.setItem('main.d.a', 100));
+    assert.equal(handler.data.getItem('main.d.sum'), 107);
+});
+
 test('livelock backstop: a → b → a re-queue trips FORMULA_REQUEUE_LIMIT', () => {
     class PingPong extends HtmlBuilder {
         static bump(b) { return (b.v || 0) + 1; }

@@ -47,6 +47,29 @@ const BASE_GRAMMAR = {
 /** Schema fields of a data-element, stripped from the func bindings. */
 const DATA_ELEMENT_FIELDS = new Set(['destination', 'func', 'value', '_on_start']);
 
+/** A bare identifier is a func NAME (resolved via data_logic); anything
+ *  else is a JS code string, compiled to a function. */
+const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+
+const _funcCache = new Map();
+
+/** Compile a JS code string to a function (memoized). The string must
+ *  evaluate to a function: `'(b) => b.base * b.altezza'`,
+ *  `'({qty, price}) => qty * price'`, `'(node, b) => node.SET(".x", b.y)'`.
+ *  DIFF-PYTHON: a JS-only extension — the recipe can carry inline logic. */
+function compileFunc(code) {
+    let fn = _funcCache.get(code);
+    if (fn === undefined) {
+        // eslint-disable-next-line no-new-func
+        fn = new Function(`"use strict"; return (${code});`)();
+        if (typeof fn !== 'function') {
+            throw new Error(`data-element func code did not evaluate to a function: ${code}`);
+        }
+        _funcCache.set(code, fn);
+    }
+    return fn;
+}
+
 export class BuilderBase {
     constructor(name = null) {
         this.name = name || this.constructor._name;
@@ -303,19 +326,31 @@ export class BuilderBase {
 
     _buildDataLogic() { return this; }
 
-    /** Resolve `name` to a static method over the data_logic sources
-     *  (left-to-right, first wins). A source is either the builder instance
-     *  (its class holds the funcs) or a dedicated business-logic class
-     *  passed directly — both looked up as a static member. */
-    _resolveLogicFunc(name) {
+    /** Resolve a data-element `func`, which may be:
+     *  - a function (a callable passed directly);
+     *  - a bare-identifier string → a NAME, resolved as a static method
+     *    over the data_logic sources (left-to-right, first wins); a source
+     *    is the builder instance (its class holds the funcs) or a dedicated
+     *    business-logic class;
+     *  - any other string → a JS code string, compiled to a function. */
+    _resolveLogicFunc(func) {
+        if (typeof func === 'function') {
+            return func;
+        }
+        if (typeof func !== 'string') {
+            throw new Error('data-element func must be a name, a function, or a JS code string');
+        }
+        if (!IDENTIFIER_RE.test(func)) {
+            return compileFunc(func);
+        }
         for (const source of this.dataLogic) {
             const holder = typeof source === 'function' ? source : source.constructor;
-            const fn = holder[name];
+            const fn = holder[func];
             if (typeof fn === 'function') {
                 return fn;
             }
         }
-        throw new Error(`data-element func '${name}' not found on any data_logic source`);
+        throw new Error(`data-element func '${func}' not found on any data_logic source`);
     }
 
     /** A data-element node's func bindings: runtimeValues (which resolves
