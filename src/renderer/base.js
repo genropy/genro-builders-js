@@ -18,7 +18,8 @@
  * Not-yet-ported branches (later slices) raise or are skipped
  * explicitly: components, sub-builders, cardinality validation.
  */
-import { SourceBag } from '../source-bag.js';
+import { Bag } from 'genro-bag-js';
+import { SourceBag, wrapSource } from '../source-bag.js';
 
 export class RendererBase {
     constructor(builder, handler = null) {
@@ -64,7 +65,10 @@ export class RendererBase {
         if (node._getMeta('data_element')) {
             return null;   // transparent: the walk never emits, absence is null
         }
-        // component / sub-builder / cardinality validation: later slices.
+        if (node._getMeta('component')) {
+            return this._renderComponent(node, ra, opts);
+        }
+        // sub-builder / cardinality validation: later slices.
         const renderer = this.getRender(node.builder);
         let tag;
         [tag, ra] = renderer._handleMeta(node, ra);
@@ -92,6 +96,83 @@ export class RendererBase {
             }
         }
         return fragments;
+    }
+
+    // --- @component expansion (render-time) --------------------------
+
+    /** Expand a component node and render the expansion in its place.
+     *  The body (kept on the builder) receives a fresh throw-away root and
+     *  builds exactly ONE tree. Three forms: params (one block), `store`
+     *  (one block anchored to a record), `iterate` (N blocks, one per
+     *  child of the collection). */
+    _renderComponent(node, runtimeAttrs, opts) {
+        const [body, iterable, anchor, bodyKwargs] = this._expansionInputs(node, runtimeAttrs);
+        if (node.getAttr('iterate') == null) {
+            return this._expandBlock(node, body, anchor, bodyKwargs, opts);
+        }
+        if (iterable == null) {
+            return [];   // empty collection → zero blocks (data-driven stop)
+        }
+        if (!(iterable instanceof Bag)) {
+            throw new Error(
+                `component '${node.nodeTag}': iterate must resolve to a Bag`,
+            );
+        }
+        // one expansion per child, each getting only the child's label.
+        return iterable.getNodes().map(
+            (child) => this._expandBlock(node, body, anchor, { node_label: child.label }, opts),
+        );
+    }
+
+    /** The expansion prep: (body, iterable, anchor, bodyKwargs). Reads the
+     *  data anchors RAW (store/iterate), drops the machinery kwargs, and
+     *  passes reactive-pointer kwargs THROUGH as absolutized pointers
+     *  (CMP.4: the address must reach the node the body builds). */
+    _expansionInputs(node, runtimeAttrs) {
+        const builder = node.builder;
+        const body = builder[node.nodeTag];
+        const iterable = runtimeAttrs.iterate;
+        delete runtimeAttrs.iterate;
+        delete runtimeAttrs.store;
+        delete runtimeAttrs.id;
+        delete runtimeAttrs.lazy;
+        let anchor = node.getAttr('iterate') || node.getAttr('store');
+        if (anchor != null) {
+            if (node.pointerType(anchor)) {
+                anchor = anchor.slice(1);
+            }
+            if (anchor.startsWith('.')) {
+                anchor = node._composeRelativeDatapath(anchor, anchor);
+            }
+        } else {
+            anchor = null;
+        }
+        for (const name of Object.keys(runtimeAttrs)) {
+            const raw = node.getAttr(name);
+            if (node.pointerType(raw) === '^') {
+                const abs = node.absDatapath(raw);
+                const dot = abs.indexOf('.');
+                const volume = dot === -1 ? abs : abs.slice(0, dot);
+                const rest = dot === -1 ? '' : abs.slice(dot + 1);
+                runtimeAttrs[name] = `^${volume}:${rest}`;
+            }
+        }
+        return [body, iterable, anchor, runtimeAttrs];
+    }
+
+    /** ONE expansion: throw-away root, body call, single-tree check,
+     *  rendered fragment. A forest (≠1 root) raises. */
+    _expandBlock(node, body, anchor, bodyKwargs, opts) {
+        const root = node.builder._expansionRoot(anchor);
+        body.call(node.builder, wrapSource(root), bodyKwargs);
+        const roots = root.getNodes();
+        if (roots.length !== 1) {
+            throw new Error(
+                `component '${node.nodeTag}' must build a tree, not a forest: `
+                + `${roots.length} root nodes`,
+            );
+        }
+        return this.render(roots[0], opts);
     }
 
     /** Normalize the source before the top-level walk. Identity by default. */

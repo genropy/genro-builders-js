@@ -466,6 +466,34 @@ export class BuilderBase {
         }
     }
 
+    /** Add the @components declared via `static components = [...]` to the
+     *  schema, marked `_meta.component`; the body stays a method on the
+     *  page (run at render time by the renderer's expansion). */
+    _resolveComponents() {
+        const names = this.constructor.components;
+        if (!Array.isArray(names) || !names.length) {
+            return;
+        }
+        const merged = { ...this.schema };
+        for (const name of names) {
+            merged[name] = { sub_tags: '', _meta: { component: true } };
+        }
+        this.constructor._classSchema = merged;
+        this.constructor._tagNames = null;
+    }
+
+    /** Fresh throw-away root for a component expansion (CMP.2): a payload
+     *  under SOURCE_ROOT inside a wrapper; `datapath` (the expansion's data
+     *  anchor) is stamped on the structural node so the body's relative
+     *  pointers find it through the ancestor climb. Built, rendered, dropped. */
+    _expansionRoot(datapath = null) {
+        const wrapper = new SourceBag(null, this, null);
+        wrapper.setBackref();   // before insert, so SOURCE_ROOT inherits it
+        wrapper.setItem(SOURCE_ROOT, new SourceBag(null, this, null),
+            datapath ? { datapath } : null);
+        return wrapper.getItem(SOURCE_ROOT);
+    }
+
     /** Fold the required collections' grammar into an own per-page schema
      *  (additive over the inherited one) and define their custom elements. */
     _resolveCollections() {
@@ -491,6 +519,7 @@ export class BuilderBase {
         this._requiredCollections = new Set(this.constructor.wc_requires || []);
         this.setup(this.data);
         this._resolveCollections();
+        this._resolveComponents();
         this.main(wrapSource(this.source));
         // First calculation: run every setter + the _on_start formulas/controllers.
         this.computeLogic(this._onStartDataElements());
@@ -541,14 +570,31 @@ export class BuilderBase {
                 plan.push(['remove', path, null]);
                 continue;
             }
-            const node = this.source.getNode(path);
+            let node = this.source.getNode(path);
             if (node === null || node === undefined) {
                 throw new Error(`queued render path ${path} is no longer in the source`);
             }
-            if (node._getMeta('component')) {
-                throw new Error('component patch ops not yet ported');
+            if (kind === 'ins') {
+                plan.push(['insert', path, node]);
+                continue;
             }
-            plan.push([kind === 'ins' ? 'insert' : 'replace', path, node]);
+            if (node._getMeta('component')) {
+                // An iterate component renders as N sibling blocks with no
+                // bounding element: its replacement unit is the enclosing
+                // element. At the source root there is none — the whole
+                // document is the unit (full render). Level 0; the fine
+                // row/cell patch ops are a later slice.
+                const parent = node.parentBag.parentNode;
+                const parentPath = parent !== null && parent !== undefined
+                    ? this.source.relativePath(parent) : null;
+                if (!parentPath) {
+                    return this.render(opts);
+                }
+                node = parent;
+                plan.push(['replace', parentPath, node]);
+                continue;
+            }
+            plan.push(['replace', path, node]);
         }
 
         // Dedup + ancestor-cover: a replace at P covers any op under P.
