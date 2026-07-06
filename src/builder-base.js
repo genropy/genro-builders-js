@@ -30,6 +30,23 @@ import { getCollection, injectCollectionCss } from './collections.js';
 /** Structural segment that carries the payload source (tree-not-forest). */
 export const SOURCE_ROOT = '_root_';
 
+/** Data-elements: transparent @elements (marked `_meta.data_element`) that
+ *  drive the reactive cascade — a setter seeds a datum, a formula computes
+ *  one from others, a controller runs side effects. Grammar of BuilderBase,
+ *  so every dialect inherits them. Called with a kwargs object
+ *  (`dataSetter({destination, value})`, `dataFormula({destination, func, ...bindings})`,
+ *  `dataController({func, ...bindings})`) — DIFF-PYTHON: JS has no **kwargs. */
+const BASE_GRAMMAR = {
+    elements: {
+        dataSetter: { sub_tags: '', _meta: { data_element: 'setter' } },
+        dataFormula: { sub_tags: '', _meta: { data_element: 'formula' } },
+        dataController: { sub_tags: '', _meta: { data_element: 'controller' } },
+    },
+};
+
+/** Schema fields of a data-element, stripped from the func bindings. */
+const DATA_ELEMENT_FIELDS = new Set(['destination', 'func', 'value', '_on_start']);
+
 export class BuilderBase {
     constructor(name = null) {
         this.name = name || this.constructor._name;
@@ -60,6 +77,9 @@ export class BuilderBase {
         this._abstracts = { ...(parent._abstracts || {}), ...(doc.abstracts || {}) };
         this._tagNames = null;
     }
+
+    // The data-elements are grammar of the base, inherited by every dialect.
+    static { this.defineGrammar(BASE_GRAMMAR); }
 
     get schema() {
         return this.constructor._classSchema || {};
@@ -269,6 +289,98 @@ export class BuilderBase {
 
     // --- lifecycle ---------------------------------------------------
 
+    // --- data-element logic ------------------------------------------
+
+    /** Sources searched (left-to-right) to resolve a data-element func.
+     *  Default `[this]`; override `_buildDataLogic` to add more. */
+    get dataLogic() {
+        if (!this._dataLogic) {
+            const built = this._buildDataLogic();
+            this._dataLogic = Array.isArray(built) ? built : [built];
+        }
+        return this._dataLogic;
+    }
+
+    _buildDataLogic() { return this; }
+
+    /** Resolve `name` to a static method over the data_logic sources
+     *  (left-to-right, first wins). The func lives on the page class,
+     *  like a Python @staticmethod. */
+    _resolveLogicFunc(name) {
+        for (const source of this.dataLogic) {
+            const fn = source.constructor[name];
+            if (typeof fn === 'function') {
+                return fn;
+            }
+        }
+        throw new Error(`data-element func '${name}' not found on any data_logic source`);
+    }
+
+    /** A data-element node's func bindings: runtimeValues (which resolves
+     *  `^`/`=` AND registers the `^` readers → the formula recomputes when
+     *  an input changes) minus the element's own schema fields. */
+    _bindings(node) {
+        const [, resolved] = this.runtimeValues(node);
+        const out = {};
+        for (const [k, v] of Object.entries(resolved)) {
+            if (!DATA_ELEMENT_FIELDS.has(k)) {
+                out[k] = v;
+            }
+        }
+        return out;
+    }
+
+    /** Execute a list of data-element nodes. */
+    computeLogic(nodes) {
+        for (const node of nodes) {
+            this._computeNode(node);
+        }
+    }
+
+    /** Execute one data-element by kind: setter seeds, formula computes
+     *  (pure), controller runs side effects (func gets the node). */
+    _computeNode(node) {
+        const attr = node.getAttr() || {};
+        if (node.nodeTag === 'dataSetter') {
+            const attrs = {};
+            for (const [k, v] of Object.entries(attr)) {
+                if (k !== 'destination' && k !== 'value' && !k.startsWith('_')) {
+                    attrs[k] = v;
+                }
+            }
+            node.setRelativeData(attr.destination, attr.value, {
+                attributes: Object.keys(attrs).length ? attrs : null,
+            });
+        } else if (node.nodeTag === 'dataFormula') {
+            const func = this._resolveLogicFunc(attr.func);
+            node.setRelativeData(attr.destination, func(this._bindings(node)));
+        } else if (node.nodeTag === 'dataController') {
+            const func = this._resolveLogicFunc(attr.func);
+            func(node, this._bindings(node));
+        }
+    }
+
+    /** Source data-elements to run at create(): every setter + anything
+     *  flagged `_on_start`, in document order. */
+    _onStartDataElements() {
+        const result = [];
+        const walk = (bag) => {
+            for (const node of bag.getNodes()) {
+                if (node._getMeta('data_element')
+                    && (node.nodeTag === 'dataSetter' || node.getAttr('_on_start'))) {
+                    result.push(node);
+                }
+                if (node.value instanceof SourceBag) {
+                    walk(node.value);
+                }
+            }
+        };
+        walk(this.source);
+        return result;
+    }
+
+    // --- lifecycle ---------------------------------------------------
+
     setup(_data) {}
 
     main(_root) {
@@ -316,6 +428,8 @@ export class BuilderBase {
         this.setup(this.data);
         this._resolveCollections();
         this.main(wrapSource(this.source));
+        // First calculation: run every setter + the _on_start formulas/controllers.
+        this.computeLogic(this._onStartDataElements());
         if (this._isReactive) {
             this._sourceroot.subscribe('builder_source', {
                 insert: (e) => this._onSourceEvent(e.node, e.evt, e.pathlist, e),

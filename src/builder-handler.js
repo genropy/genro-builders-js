@@ -19,6 +19,10 @@
  */
 import { Bag } from 'genro-bag-js';
 
+/** A formula re-queued more than this many times in one flush is a
+ *  livelock (a → b → a): the drain raises, naming the func. */
+const FORMULA_REQUEUE_LIMIT = 50;
+
 export class BuilderHandler {
     constructor(application = null) {
         this.builders = {};
@@ -34,6 +38,9 @@ export class BuilderHandler {
         this._liveTarget = null;
         // Deleted nodes' target_ids captured at the delete event.
         this._removedTargetIds = new Map();
+        // Formula cascade: FIFO queue drained at the live() flush.
+        this._formulaQueue = [];
+        this._pendingFormulas = new Set();
     }
 
     get data() {
@@ -179,6 +186,57 @@ export class BuilderHandler {
         return grouped;
     }
 
+    // --- formula cascade ---------------------------------------------
+
+    /** Recompute the data-element readers, delegating to each builder.
+     *  Inside a live section formulas do NOT compute: they queue (dedup
+     *  on the node) for the flush drain; controllers/setters stay
+     *  synchronous. Plain view readers are skipped (they only re-render). */
+    executeLogic(relevant) {
+        for (const [builder, items] of relevant) {
+            for (const [, node] of items) {
+                if (!node._getMeta('data_element')) {
+                    continue;
+                }
+                if (node.nodeTag === 'dataFormula' && this._liveDepth) {
+                    this._enqueueFormula(node, builder);
+                } else {
+                    builder.computeLogic([node]);
+                }
+            }
+        }
+    }
+
+    /** Queue one formula, deduped on the node (a pending key does not
+     *  queue twice; it will read the settled inputs when it drains). */
+    _enqueueFormula(node, builder) {
+        if (this._pendingFormulas.has(node)) {
+            return;
+        }
+        this._pendingFormulas.add(node);
+        this._formulaQueue.push([node, builder]);
+    }
+
+    /** Drain the queued formulas FIFO until dry. Their writes re-enter the
+     *  cascade (formulas re-queue, controllers run at once). A key draining
+     *  more than FORMULA_REQUEUE_LIMIT times is a livelock → explicit error. */
+    _drainFormulas() {
+        const counts = new Map();
+        while (this._formulaQueue.length) {
+            const [node, builder] = this._formulaQueue.shift();
+            this._pendingFormulas.delete(node);
+            const n = (counts.get(node) || 0) + 1;
+            counts.set(node, n);
+            if (n > FORMULA_REQUEUE_LIMIT) {
+                throw new Error(
+                    `formula livelock: '${node.getAttr('func')}' re-queued more `
+                    + `than ${FORMULA_REQUEUE_LIMIT} times in one flush`,
+                );
+            }
+            builder.computeLogic([node]);
+        }
+    }
+
     _onDataEvent(e) {
         const { node, evt, pathlist, reason } = e;
         if (reason === 'autocreate') {
@@ -188,6 +246,9 @@ export class BuilderHandler {
             ? [...pathlist, node.label].join('.')
             : pathlist.join('.');
         const relevant = this._relevantNodes(path);
+        // Recompute the data-element readers first (their writes re-enter
+        // here and cascade); then queue the view readers for the render.
+        this.executeLogic(relevant);
         for (const [, items] of relevant) {
             for (const [, viewNode] of items) {
                 // Anti-echo (legacy gnrdomsource `if (kw.reason != this)`):
@@ -282,25 +343,35 @@ export class BuilderHandler {
         if (this._liveDepth === 1) {
             this._nodesToRender = {};
             this._removedTargetIds = new Map();
+            this._formulaQueue = [];
+            this._pendingFormulas = new Set();
             this._liveTarget = target;
         }
         try {
             fn();
         } finally {
             if (this._liveDepth === 1) {
-                this._liveDepth -= 1;
                 try {
-                    for (const [name, entries] of Object.entries(this._nodesToRender)) {
-                        if (entries.length) {
-                            this.builders[name].renderNodes(
-                                this._optimizeRender(entries), this._liveTarget,
-                            );
-                        }
-                    }
+                    // Drain with depth still 1, so the formulas' writes queue
+                    // their render paths and re-queue further formulas.
+                    this._drainFormulas();
                 } finally {
-                    this._nodesToRender = {};
-                    this._removedTargetIds = new Map();
-                    this._liveTarget = null;
+                    this._liveDepth -= 1;
+                    try {
+                        for (const [name, entries] of Object.entries(this._nodesToRender)) {
+                            if (entries.length) {
+                                this.builders[name].renderNodes(
+                                    this._optimizeRender(entries), this._liveTarget,
+                                );
+                            }
+                        }
+                    } finally {
+                        this._nodesToRender = {};
+                        this._removedTargetIds = new Map();
+                        this._formulaQueue = [];
+                        this._pendingFormulas = new Set();
+                        this._liveTarget = null;
+                    }
                 }
             } else {
                 this._liveDepth -= 1;
