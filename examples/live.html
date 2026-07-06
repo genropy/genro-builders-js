@@ -99,18 +99,27 @@
   }
 
   main(root) {
-    const bc = root.borderContainer({ design: 'headline',
+    // design 'sidebar': left/right occupano tutta l'altezza; top/center/bottom
+    // impilati nella colonna centrale.
+    const bc = root.borderContainer({ design: 'sidebar',
       style: 'height:70vh;border:1px solid #cbd5e1;border-radius:6px' });
 
-    // top: header a tutta larghezza
+    // top: header (colonna centrale, in alto)
     bc.div({ slot: 'top', style: 'background:#1e293b;color:#fff;padding:10px 14px' })
       .h3('Scheda cliente', { style: 'margin:0' });
 
-    // left: menu con splitter trascinabile (ridimensiona la regione)
+    // left: menu con splitter trascinabile (asse X → ridimensiona la larghezza)
     const menu = bc.div({ slot: 'left', splitter: true,
       style: 'width:170px;background:#f1f5f9;padding:10px' });
     menu.p('Sezioni', { style: 'font-weight:600;margin:.2rem 0' });
     menu.p('Anagrafica'); menu.p('Contatti'); menu.p('Note');
+
+    // right: pannello laterale, anch'esso con splitter (asse X)
+    const side = bc.div({ slot: 'right', splitter: true,
+      style: 'width:200px;background:#f8fafc;padding:10px;border-left:1px solid #e2e8f0' });
+    side.p('Dettagli', { style: 'font-weight:600;margin:.2rem 0' });
+    side.p('Trascina i bordi interni per ridimensionare le regioni.',
+      { style: 'color:#64748b;font-size:.85em' });
 
     // center (slot di default → nessun attributo slot): il tabContainer,
     // la scheda attiva vive in ^ui.tab.
@@ -122,10 +131,11 @@
     tc.tab({ label: 'Note', key: 'note' })
       .textBox({ value: '^cli.note', lbl: 'Note', updateOn: 'input' });
 
-    // bottom: footer che RIFLETTE la scheda selezionata (reattivo).
-    // span FRATELLI: un nodo ha valore-testo OPPURE figli, mai entrambi —
-    // '.span("x").span("^y")' scarterebbe "x".
-    const foot = bc.div({ slot: 'bottom',
+    // bottom: footer con splitter (asse Y → ridimensiona l'altezza) che
+    // RIFLETTE la scheda selezionata (reattivo). span FRATELLI: un nodo ha
+    // valore-testo OPPURE figli, mai entrambi — '.span("x").span("^y")'
+    // scarterebbe "x".
+    const foot = bc.div({ slot: 'bottom', splitter: true,
       style: 'background:#f8fafc;padding:6px 14px;color:#64748b;font-size:.85em' });
     foot.span('Scheda selezionata: ');
     foot.span('^ui.tab');
