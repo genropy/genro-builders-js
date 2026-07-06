@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { setupDom } from './dom.js';
 import { HtmlBuilder } from '../src/contrib/html/html-builder.js';
 import { Application } from '../src/application.js';
+import '../src/collections/layout.js';   // registers 'layout' (panel, box)
 
 class Page extends HtmlBuilder {
     static containers = ['card'];
@@ -49,4 +50,29 @@ test('@container nodes are real (addressable) source, patchable like any node', 
     const card = root.querySelector('.card');
     assert.equal(card.tagName.toLowerCase(), 'div');
     assert.ok(card.querySelector('h3') && card.querySelector('p'));
+});
+
+test('container web component projects its children through a shadow slot', () => {
+    setupDom();
+    class LayoutPage extends HtmlBuilder {
+        static wc_requires = ['layout'];
+
+        main(root) {
+            const p = root.panel({ caption: 'Dati' });
+            p.div('figlio 1');
+            p.div('figlio 2');
+        }
+    }
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    new Application(root, new LayoutPage('main'));   // eslint-disable-line no-new
+
+    const panel = root.querySelector('gnr-panel');
+    assert.ok(panel, 'projected as <gnr-panel>');
+    assert.equal(panel.getAttribute('caption'), 'Dati');
+    // children live in the panel's LIGHT DOM (the renderer appended them)
+    assert.equal(panel.querySelectorAll('div').length, 2);
+    // the shadow carries the slot + the caption header
+    assert.ok(panel.shadowRoot.querySelector('slot'), 'shadow has a slot');
+    assert.equal(panel.shadowRoot.querySelector('.hdr').textContent, 'Dati');
 });
