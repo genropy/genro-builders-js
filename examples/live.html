@@ -108,9 +108,11 @@
     bc.div({ slot: 'top', style: 'background:#1e293b;color:#fff;padding:10px 14px' })
       .h3('Scheda cliente', { style: 'margin:0' });
 
-    // left: menu con splitter trascinabile (asse X → ridimensiona la larghezza)
-    const menu = bc.div({ slot: 'left', splitter: true,
-      style: 'width:170px;background:#f1f5f9;padding:10px' });
+    // left: DRAWER collassabile (la maniglia ‹/› lo apre/chiude); drawer
+    // implica splitter (asse X). Stile scritto coi kwarg Genro (width /
+    // background / padding → l'adattatore li folda in style=).
+    const menu = bc.div({ slot: 'left', drawer: true,
+      width: '170px', background: '#f1f5f9', padding: '10px' });
     menu.p('Sezioni', { style: 'font-weight:600;margin:.2rem 0' });
     menu.p('Anagrafica'); menu.p('Contatti'); menu.p('Note');
 

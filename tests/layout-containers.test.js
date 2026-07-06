@@ -116,3 +116,39 @@ test('a tab click writes the bound pointer (write-back, no data-set-pointer)', (
     assert.equal(genro.data.getItem('main.ui.tab'), 'two');   // the click mutated the datum
     assert.deepEqual(paneVis(host), { one: 'hidden', two: 'shown' });
 });
+
+class DrawerPage extends HtmlBuilder {
+    static wc_requires = ['layout'];
+
+    main(root) {
+        const bc = root.borderContainer();
+        bc.div({ slot: 'left', drawer: true, width: '160px' }).span('menu');
+        bc.div({ slot: 'right', drawer: 'close', width: '160px' }).span('side');
+        bc.div().span('center');
+    }
+}
+
+const region = (host, name) => host.querySelector('gnr-bordercontainer')
+    .shadowRoot.querySelector(`.region.${name}`);
+
+test('a drawer region gets a toggle and implies a splitter handle', () => {
+    const { host } = mountApp(DrawerPage);
+    const left = region(host, 'left');
+    assert.ok(left.querySelector('.drawer-toggle'), 'drawer has a toggle');
+    assert.ok(left.querySelector('.handle'), 'drawer implies a splitter handle');
+});
+
+test('drawer starts open by default, drawer="close" starts collapsed', () => {
+    const { host } = mountApp(DrawerPage);
+    assert.equal(region(host, 'left').classList.contains('drawer-closed'), false);
+    assert.equal(region(host, 'right').classList.contains('drawer-closed'), true);
+});
+
+test('the toggle collapses and expands the drawer', () => {
+    const { host } = mountApp(DrawerPage);
+    const left = region(host, 'left');
+    left.querySelector('.drawer-toggle').click();
+    assert.equal(left.classList.contains('drawer-closed'), true);
+    left.querySelector('.drawer-toggle').click();
+    assert.equal(left.classList.contains('drawer-closed'), false);
+});

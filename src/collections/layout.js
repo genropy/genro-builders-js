@@ -68,7 +68,22 @@ const BORDER_CSS =
     + '.handle { position: absolute; z-index: 5; }'
     + '.handle.x { top: 0; bottom: 0; width: 6px; cursor: col-resize; }'
     + '.handle.y { left: 0; right: 0; height: 6px; cursor: row-resize; }'
-    + '.handle:hover { background: var(--splitter-hover, rgba(74,144,217,.4)); }';
+    + '.handle:hover { background: var(--splitter-hover, rgba(74,144,217,.4)); }'
+    // drawer: a collapsible region — closed shrinks to a thin strip that
+    // keeps the toggle reachable; the slot content and the splitter hide.
+    + '.drawer-toggle { position: absolute; z-index: 6; cursor: pointer;'
+    + '  background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 3px;'
+    + '  font-size: 11px; line-height: 1; padding: 2px 5px; user-select: none; }'
+    + '.drawer-toggle.left { right: 2px; top: 2px; }'
+    + '.drawer-toggle.right { left: 2px; top: 2px; }'
+    + '.drawer-toggle.top { left: 2px; bottom: 2px; }'
+    + '.drawer-toggle.bottom { left: 2px; top: 2px; }'
+    + '.region.left.drawer-closed, .region.right.drawer-closed'
+    + '  { width: 24px !important; overflow: hidden; }'
+    + '.region.top.drawer-closed, .region.bottom.drawer-closed'
+    + '  { height: 24px !important; overflow: hidden; }'
+    + '.region.drawer-closed > slot { display: none; }'
+    + '.region.drawer-closed > .handle { display: none; }';
 
 const TABS_CSS =
     ':host { display: flex; flex-direction: column; min-height: 0; }'
@@ -151,6 +166,7 @@ function defineComponents() {
         connectedCallback() {
             this._applyDesign();
             this._setupSplitters();
+            this._setupDrawers();
         }
 
         attributeChangedCallback(name) {
@@ -168,14 +184,17 @@ function defineComponents() {
             ) || null;
         }
 
-        // A region child marked `splitter` gets a drag bar on its inner edge:
-        // left/right resize width, top/bottom resize height (of the cell).
+        // A region child marked `splitter` (or `drawer`, which implies it —
+        // legacy: `drawer && region → splitter=true`) gets a drag bar on its
+        // inner edge: left/right resize width, top/bottom resize height.
         _setupSplitters() {
             const axis = { left: 'x', right: 'x', top: 'y', bottom: 'y' };
             for (const name of ['left', 'right', 'top', 'bottom']) {
                 const child = this._regionChild(name);
                 const cell = this._cells[name];
-                if (!child || !child.hasAttribute('splitter') || cell._handled) {
+                const wants = child
+                    && (child.hasAttribute('splitter') || child.hasAttribute('drawer'));
+                if (!wants || cell._handled) {
                     continue;
                 }
                 cell._handled = true;
@@ -202,6 +221,40 @@ function defineComponents() {
                     window.addEventListener('mousemove', move);
                     window.addEventListener('mouseup', up);
                 });
+            }
+        }
+
+        // A region child marked `drawer` becomes COLLAPSIBLE: a toggle on the
+        // inner edge opens/closes it (closed → the cell shrinks to a thin
+        // strip, content + splitter hidden). `drawer="close"` starts closed;
+        // any other value starts open (legacy: drawer=true|'close').
+        _setupDrawers() {
+            const sym = {
+                left: { open: '‹', closed: '›' }, right: { open: '›', closed: '‹' },
+                top: { open: '⌃', closed: '⌄' }, bottom: { open: '⌄', closed: '⌃' },
+            };
+            for (const name of ['left', 'right', 'top', 'bottom']) {
+                const child = this._regionChild(name);
+                const cell = this._cells[name];
+                if (!child || !child.hasAttribute('drawer') || cell._drawered) {
+                    continue;
+                }
+                cell._drawered = true;
+                const toggle = document.createElement('div');
+                toggle.className = `drawer-toggle ${name}`;
+                const render = () => {
+                    const closed = cell.classList.contains('drawer-closed');
+                    toggle.textContent = closed ? sym[name].closed : sym[name].open;
+                };
+                toggle.addEventListener('click', () => {
+                    cell.classList.toggle('drawer-closed');
+                    render();
+                });
+                cell.appendChild(toggle);
+                if (child.getAttribute('drawer') === 'close') {
+                    cell.classList.add('drawer-closed');
+                }
+                render();
             }
         }
     }
