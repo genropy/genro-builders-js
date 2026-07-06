@@ -108,7 +108,7 @@ export class RendererBase {
     _renderComponent(node, runtimeAttrs, opts) {
         const [body, iterable, anchor, bodyKwargs] = this._expansionInputs(node, runtimeAttrs);
         if (node.getAttr('iterate') == null) {
-            return this._expandBlock(node, body, anchor, bodyKwargs, opts);
+            return this._expandBlock(node, body, anchor, bodyKwargs, [], opts);
         }
         if (iterable == null) {
             return [];   // empty collection → zero blocks (data-driven stop)
@@ -120,7 +120,9 @@ export class RendererBase {
         }
         // one expansion per child, each getting only the child's label.
         return iterable.getNodes().map(
-            (child) => this._expandBlock(node, body, anchor, { node_label: child.label }, opts),
+            (child) => this._expandBlock(
+                node, body, anchor, { node_label: child.label }, [child.label], opts,
+            ),
         );
     }
 
@@ -161,8 +163,9 @@ export class RendererBase {
     }
 
     /** ONE expansion: throw-away root, body call, single-tree check,
-     *  rendered fragment. A forest (≠1 root) raises. */
-    _expandBlock(node, body, anchor, bodyKwargs, opts) {
+     *  derived identity (reactive render only), rendered fragment. A forest
+     *  (≠1 root) raises. */
+    _expandBlock(node, body, anchor, bodyKwargs, wbLabels, opts) {
         const root = node.builder._expansionRoot(anchor);
         body.call(node.builder, wrapSource(root), bodyKwargs);
         const roots = root.getNodes();
@@ -172,7 +175,140 @@ export class RendererBase {
                 + `${roots.length} root nodes`,
             );
         }
+        if (opts.includeDatapath) {
+            // Derived identity is a REACTIVE-render concern, like the
+            // auto-id: the static render stays untouched.
+            this._registerExpansionWriteback(node, roots[0], wbLabels);
+        }
         return this.render(roots[0], opts);
+    }
+
+    /** Render ONE expansion block of a component node — the per-row patch
+     *  unit (CMP.7). `label` addresses the row of an iterate component
+     *  (null = the single store-anchored block). Same prep, same body, same
+     *  registration as the walk: the fragment cannot diverge from a full
+     *  render. */
+    renderExpansionBlock(node, label = null, opts = {}) {
+        const [, runtimeAttrs] = node.builder.runtimeValues(node);
+        const [body, , anchor, bodyKwargs] = this._expansionInputs(node, runtimeAttrs);
+        let kwargs = bodyKwargs;
+        let wbLabels = [];
+        if (label !== null) {
+            kwargs = { node_label: label };
+            wbLabels = [label];
+        }
+        return this._expandBlock(node, body, anchor, kwargs, wbLabels, opts);
+    }
+
+    /** Derived identity for expansion nodes — the virtual-children map,
+     *  write-back side (CMP.7). Expansion nodes never get a serial of their
+     *  own (they reincarnate); their identity is DERIVED and deterministic:
+     *  `<base>[.<label>...].<ordinal>` — base is the component node's id,
+     *  labels the row identities crossed, the ordinal the body's build order.
+     *  The composite id is stamped as the author-id (the renderer emits it,
+     *  the auto-id skips), and the WRITABLE nodes land in the writeback map.
+     *  Re-expansion purges its own prefix first, so the map holds no stale
+     *  rows. Cataloged data-elements (row rules) are the component-rules
+     *  slice; here they are only collected, never rendered. */
+    _registerExpansionWriteback(compNode, treeRoot, labels) {
+        const builder = compNode.builder;
+        const base = compNode.getAttr('id') || builder.targetId(compNode);
+        if (base === null || base === undefined) {
+            return;
+        }
+        const prefix = [String(base), ...labels].join('.');
+        builder._purgeWritebackPrefix(prefix);
+        const handler = builder.handler;
+        // The cell catalog rebuilds per expansion and is identical for every
+        // row (the body is code): reset, the last row wins.
+        if (labels.length === 1) {
+            builder._cellMap[base] = {};
+        }
+        const ruleNodes = [];
+        let counter = 0;
+        const queue = [treeRoot];
+        while (queue.length) {
+            const current = queue.shift();
+            if (current._getMeta('data_element')) {
+                // Row logic: cataloged, never rendered. Seeding is a
+                // render-time write — forbidden inside a pure projection.
+                if (current.nodeTag === 'dataSetter') {
+                    throw new Error(
+                        'dataSetter inside an expansion body: seeding is a '
+                        + 'render-time write, expansions are pure projections',
+                    );
+                }
+                if (current.getAttr('_on_start')) {
+                    throw new Error(
+                        '_on_start inside an expansion body: row logic is '
+                        + 'mutation-only (loaded data is trusted)',
+                    );
+                }
+                if (handler) {
+                    ruleNodes.push(current);
+                }
+                continue;
+            }
+            counter += 1;
+            const composite = `${prefix}.${counter}`;
+            current.setAttr({ id: composite }, false);
+            // Only WRITE-BACK nodes enter the map: a pointer on a writable
+            // attribute (value/checked). A pure reader re-renders via the
+            // pointer_map, it is not a mutation target.
+            const writable = current.pointers().some(
+                ([name]) => name === 'value' || name === 'checked',
+            );
+            if (writable) {
+                builder._writebackAdd(prefix, composite, current);
+            }
+            this._registerCell(compNode, current, labels, counter);
+            if (current.value instanceof SourceBag) {
+                queue.push(...current.value.getNodes());
+            }
+        }
+        // component rules (per-row data-elements): the next slice consumes
+        // `ruleNodes` via handler.setComponentRules.
+        void ruleNodes;
+    }
+
+    /** Catalog a patchable CELL: in-row field → (ordinal, op). The body is
+     *  code, so the ordinal of "who shows `.field`" is the SAME for every
+     *  row: the catalog is per COMPONENT, built once. Two shapes qualify —
+     *  a node whose VALUE is one reactive pointer (a text cell) and a
+     *  reactive `value` attribute (an input). The field key is the pointer's
+     *  residual against the ROW path; a pointer landing outside the row (a
+     *  shared header datum) is not a cell. Richer cells (templates, checked)
+     *  stay out: those rows fall back to the row replace. */
+    _registerCell(compNode, current, labels, ordinal) {
+        if (labels.length !== 1) {
+            return;
+        }
+        const builder = compNode.builder;
+        const base = compNode.getAttr('id') || builder.targetId(compNode);
+        const specs = builder._cellMap[base] || (builder._cellMap[base] = {});
+        const anchor = compNode.absDatapath(compNode.getAttr('iterate'));
+        const rowPrefix = `${anchor}.${labels[0]}.`;
+        const inRowField = (pointer) => {
+            const absPath = current.absDatapath(pointer);
+            if (!absPath.startsWith(rowPrefix)) {
+                return null;
+            }
+            return absPath.slice(rowPrefix.length);
+        };
+        const val = current.value;
+        if (typeof val === 'string' && current.pointerType(val) === '^') {
+            const field = inRowField(val);
+            if (field !== null) {
+                (specs[field] || (specs[field] = [])).push([ordinal, 'text', null]);
+            }
+        }
+        const rawValue = current.getAttr('value');
+        if (typeof rawValue === 'string' && current.pointerType(rawValue) === '^') {
+            const field = inRowField(rawValue);
+            if (field !== null) {
+                (specs[field] || (specs[field] = [])).push([ordinal, 'attr', 'value']);
+            }
+        }
     }
 
     /** Normalize the source before the top-level walk. Identity by default. */

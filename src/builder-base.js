@@ -30,6 +30,10 @@ import { getCollection, injectCollectionCss } from './collections.js';
 /** Structural segment that carries the payload source (tree-not-forest). */
 export const SOURCE_ROOT = '_root_';
 
+/** Slot in the writeback segment-tree holding a level's key-set (Python's
+ *  `None` dict key: a symbol so it can never collide with a path segment). */
+const WB_KEYS = Symbol('writebackKeys');
+
 /** Data-elements: transparent @elements (marked `_meta.data_element`) that
  *  drive the reactive cascade — a setter seeds a datum, a formula computes
  *  one from others, a controller runs side effects. Grammar of BuilderBase,
@@ -77,7 +81,12 @@ export class BuilderBase {
         this.data = null;
         this.target = null;
         this._targetSerial = 0;
-        this._writebackMap = {};   // derived id → expansion node (later slice)
+        // Expansion write-back (CMP.7): flat map (composite id → node) for
+        // the mutate, segment-tree index for the O(own-subtree) purge, and
+        // the per-component cell catalog (base → field → [(ordinal, op)]).
+        this._writebackMap = {};
+        this._writebackIndex = {};
+        this._cellMap = {};
         this._sourceroot = new SourceBag(null, this, null);
         // Backref first, so the SOURCE_ROOT sub-bag inherits it on insert
         // (bag-js propagates backref to children at insert time).
@@ -666,5 +675,66 @@ export class BuilderBase {
             return [this.targetId(sib), false];
         }
         return [null, false];
+    }
+
+    // --- expansion write-back index (CMP.7) --------------------------
+
+    /** Register a writable expansion node under its row prefix. Two
+     *  structures, one truth: the flat `_writebackMap` answers the mutate
+     *  (composite id → node), the segment-tree `_writebackIndex` lets the
+     *  purge pay for its OWN subtree only, never a scan of the whole map. */
+    _writebackAdd(prefix, key, node) {
+        this._writebackMap[key] = node;
+        let index = this._writebackIndex;
+        for (const segment of prefix.split('.')) {
+            if (!index[segment]) {
+                index[segment] = {};
+            }
+            index = index[segment];
+        }
+        if (!index[WB_KEYS]) {
+            index[WB_KEYS] = new Set();
+        }
+        index[WB_KEYS].add(key);
+    }
+
+    /** Drop a prefix's derived ids from the writeback map — indexed.
+     *  Re-expansion purges its own prefix before re-registering; a removed
+     *  row (never re-expands) is purged at patch time. The segment tree
+     *  pops the prefix's subtree (nested rows included) and deletes exactly
+     *  those keys: O(own entries). */
+    _purgeWritebackPrefix(prefix) {
+        const wmap = this._writebackMap;
+        const index = this._writebackIndex;
+        if (!wmap || !index) {
+            return;
+        }
+        const segments = prefix.split('.');
+        let parent = index;
+        for (const segment of segments.slice(0, -1)) {
+            parent = parent[segment];
+            if (parent === undefined) {
+                return;
+            }
+        }
+        const last = segments[segments.length - 1];
+        const subtree = parent[last];
+        if (subtree === undefined) {
+            return;
+        }
+        delete parent[last];
+        const stack = [subtree];
+        while (stack.length) {
+            const level = stack.pop();
+            for (const key of Reflect.ownKeys(level)) {
+                if (key === WB_KEYS) {
+                    for (const k of level[key]) {
+                        delete wmap[k];
+                    }
+                } else {
+                    stack.push(level[key]);
+                }
+            }
+        }
     }
 }
