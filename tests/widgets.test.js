@@ -51,6 +51,29 @@ test('required collections define their custom elements', () => {
     assert.ok(customElements.get('gnr-numbertextbox'), 'whole inputs family defined');
 });
 
+test('checkbox write-back: a change updates the checked datum', () => {
+    setupDom();
+    class CbPage extends HtmlBuilder {
+        static wc_requires = ['inputs'];
+
+        setup() { this.setData('f.flag', true); }
+
+        main(root) { root.div({ datapath: 'f' }).checkbox({ checked: '^.flag', label: 'x' }); }
+    }
+    const root = document.createElement('div');
+    document.body.appendChild(root);   // connect so connectedCallback runs
+    const genro = new Application(root, new CbPage('main'));
+
+    const cb = root.querySelector('gnr-checkbox');
+    const inner = cb.shadowRoot.querySelector('input');
+    inner.checked = false;
+    // native change is NOT composed; the widget re-emits it composed so it
+    // crosses the shadow and reaches the delegated listener.
+    inner.dispatchEvent(new window.Event('change', { bubbles: true }));
+
+    assert.equal(genro.data.getItem('main.f.flag'), false);
+});
+
 test('wcRequires() in setup (B) works like static wc_requires', () => {
     setupDom();
     class Page2 extends HtmlBuilder {

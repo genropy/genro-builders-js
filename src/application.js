@@ -129,7 +129,12 @@ export class Application {
         }
         const handle = (e) => {
             const el = e.target;
-            if (!el.id || !(el.hasAttribute && el.hasAttribute('data-value-pointer'))) {
+            if (!el.id || !el.hasAttribute) {
+                return;
+            }
+            // A checkbox binds `checked` (boolean); everything else `value`.
+            const isChecked = el.hasAttribute('data-checked-pointer');
+            if (!isChecked && !el.hasAttribute('data-value-pointer')) {
                 return;
             }
             let node;
@@ -141,7 +146,7 @@ export class Application {
             const updateOn = node.getAttr('updateOn') || 'blur';
             const wantEvent = updateOn === 'input' ? 'input' : 'change';
             if (e.type === wantEvent) {
-                this._applyMutation(node, el.value);
+                this._applyMutation(node, isChecked ? el.checked : el.value);
             }
         };
         root.addEventListener('input', handle);

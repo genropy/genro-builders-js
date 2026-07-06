@@ -26,6 +26,10 @@ function defineComponents() {
             this._input = document.createElement('input');
             this._input.type = 'color';
             root.appendChild(this._input);
+            // `change` is not composed; re-emit it on the host (see inputs.js).
+            this._input.addEventListener('change', () => {
+                this.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            });
         }
 
         connectedCallback() {

@@ -83,6 +83,13 @@ function defineComponents() {
             this._configure(this._input);
             this._buildContent(this._content);
 
+            // `input` is composed and crosses the shadow on its own; `change`
+            // is NOT composed, so re-emit it on the host so `updateOn:'blur'`
+            // and the checkbox reach the kernel's delegated listener.
+            this._input.addEventListener('change', () => {
+                this.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            });
+
             this._box.appendChild(this._label);
             this._box.appendChild(this._content);
             root.appendChild(this._box);

@@ -11,6 +11,8 @@ export function setupDom() {
     // globals their classes and registration need.
     globalThis.HTMLElement = dom.window.HTMLElement;
     globalThis.customElements = dom.window.customElements;
+    globalThis.Event = dom.window.Event;
+    globalThis.CustomEvent = dom.window.CustomEvent;
     globalThis.CSS = dom.window.CSS || {};
     if (!globalThis.CSS.escape) {
         // jsdom does not implement CSS.escape; ids are simple (n1, n2…).
