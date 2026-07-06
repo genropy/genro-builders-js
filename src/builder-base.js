@@ -304,11 +304,13 @@ export class BuilderBase {
     _buildDataLogic() { return this; }
 
     /** Resolve `name` to a static method over the data_logic sources
-     *  (left-to-right, first wins). The func lives on the page class,
-     *  like a Python @staticmethod. */
+     *  (left-to-right, first wins). A source is either the builder instance
+     *  (its class holds the funcs) or a dedicated business-logic class
+     *  passed directly — both looked up as a static member. */
     _resolveLogicFunc(name) {
         for (const source of this.dataLogic) {
-            const fn = source.constructor[name];
+            const holder = typeof source === 'function' ? source : source.constructor;
+            const fn = holder[name];
             if (typeof fn === 'function') {
                 return fn;
             }

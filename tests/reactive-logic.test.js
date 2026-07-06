@@ -102,6 +102,31 @@ test('cascade: a change flows through two formula levels', () => {
     assert.equal(handler.data.getItem('main.w.dbl'), 24);   // cascaded to dbl
 });
 
+test('data_logic: funcs resolved by name from a separate business-logic class', () => {
+    class OrderLogic {
+        static lineTotal(b) { return (b.qty || 0) * (b.price || 0); }
+    }
+    class OrderPage extends HtmlBuilder {
+        // The logic lives elsewhere; the page declares where to look.
+        _buildDataLogic() { return [this, OrderLogic]; }
+
+        main(root) {
+            const w = root.div({ datapath: 'o' });
+            w.dataSetter({ destination: '.qty', value: 3 });
+            w.dataSetter({ destination: '.price', value: 10 });
+            w.dataFormula({
+                destination: '.total', func: 'lineTotal',
+                qty: '^.qty', price: '^.price', _on_start: true,
+            });
+            w.span('^.total');
+        }
+    }
+    const handler = mount(OrderPage);
+    assert.equal(handler.data.getItem('main.o.total'), 30);   // func from OrderLogic
+    handler.live(() => handler.data.setItem('main.o.qty', 5));
+    assert.equal(handler.data.getItem('main.o.total'), 50);   // recomputed
+});
+
 test('livelock backstop: a → b → a re-queue trips FORMULA_REQUEUE_LIMIT', () => {
     class PingPong extends HtmlBuilder {
         static bump(b) { return (b.v || 0) + 1; }
