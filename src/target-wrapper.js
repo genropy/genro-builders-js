@@ -55,23 +55,27 @@ export class DomTarget extends TargetWrapper {
         this.root.replaceChildren(document);
     }
 
+    /** Locate an element by exact id. An attribute selector, dot-safe: a
+     *  derived expansion id (`blk.r2.3`) is a valid id but not a valid
+     *  `#id` selector, and jsdom's `CSS.escape` is a no-op — the attribute
+     *  form works in both jsdom and browsers. */
+    _byId(id) {
+        return this.root.querySelector(`[id="${id.replace(/["\\]/g, '\\$&')}"]`);
+    }
+
     /** Apply a batch of per-node patches to the live DOM. */
     partial(patches) {
         for (const patch of patches) {
             if (patch.op === 'insert') {
                 // A null container id means the document root.
-                const container = patch.id === null
-                    ? this.root
-                    : this.root.querySelector(`#${CSS.escape(patch.id)}`);
-                const before = patch.before
-                    ? this.root.querySelector(`#${CSS.escape(patch.before)}`)
-                    : null;
+                const container = patch.id === null ? this.root : this._byId(patch.id);
+                const before = patch.before ? this._byId(patch.before) : null;
                 if (container) {
                     container.insertBefore(patch.node, before);
                 }
                 continue;
             }
-            const el = this.root.querySelector(`#${CSS.escape(patch.id)}`);
+            const el = this._byId(patch.id);
             if (patch.op === 'remove') {
                 if (el) {
                     el.remove();
@@ -79,6 +83,16 @@ export class DomTarget extends TargetWrapper {
             } else if (patch.op === 'replace') {
                 if (el) {
                     el.replaceWith(patch.node);
+                }
+            } else if (patch.op === 'text') {
+                // Value-only cell patch: a reader span's text content.
+                if (el) {
+                    el.textContent = patch.value;
+                }
+            } else if (patch.op === 'attr') {
+                // Value-only cell patch: a bound input's attribute.
+                if (el) {
+                    el.setAttribute(patch.name, patch.value);
                 }
             }
         }

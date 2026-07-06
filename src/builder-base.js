@@ -572,27 +572,43 @@ export class BuilderBase {
         }
         const o = { ...effTarget.renderOpts, ...opts };
 
-        // Build the plan (op, path, node); component/row/cell not yet ported.
+        // Build the plan: [op, path, node, label, field]. node is null for
+        // remove; label rides the row/cell ops, field only the cells.
         const plan = [];
-        for (const { kind, path } of entries) {
+        for (const { kind, path, label, field } of entries) {
             if (kind === 'del') {
-                plan.push(['remove', path, null]);
+                plan.push(['remove', path, null, null, null]);
                 continue;
             }
             let node = this.source.getNode(path);
             if (node === null || node === undefined) {
                 throw new Error(`queued render path ${path} is no longer in the source`);
             }
+            if (kind === 'cell_upd') {
+                plan.push(['cell', path, node, label, field]);
+                continue;
+            }
+            if (kind === 'row_upd') {
+                plan.push(['row_replace', path, node, label, null]);
+                continue;
+            }
+            if (kind === 'row_ins') {
+                plan.push(['row_insert', path, node, label, null]);
+                continue;
+            }
+            if (kind === 'row_del') {
+                plan.push(['row_remove', path, node, label, null]);
+                continue;
+            }
             if (kind === 'ins') {
-                plan.push(['insert', path, node]);
+                plan.push(['insert', path, node, null, null]);
                 continue;
             }
             if (node._getMeta('component')) {
                 // An iterate component renders as N sibling blocks with no
-                // bounding element: its replacement unit is the enclosing
-                // element. At the source root there is none — the whole
-                // document is the unit (full render). Level 0; the fine
-                // row/cell patch ops are a later slice.
+                // bounding element: its whole-replacement unit is the
+                // enclosing element (a real DOM node). At the source root
+                // there is none — the whole document is the unit.
                 const parent = node.parentBag.parentNode;
                 const parentPath = parent !== null && parent !== undefined
                     ? this.source.relativePath(parent) : null;
@@ -600,37 +616,103 @@ export class BuilderBase {
                     return this.render(opts);
                 }
                 node = parent;
-                plan.push(['replace', parentPath, node]);
+                plan.push(['replace', parentPath, node, null, null]);
                 continue;
             }
-            plan.push(['replace', path, node]);
+            plan.push(['replace', path, node, null, null]);
         }
 
-        // Dedup + ancestor-cover: a replace at P covers any op under P.
+        // Dedup + ancestor-cover: a replace at P covers ANY op under it (the
+        // component's rows and cells included), the replace itself excluded.
         const seen = new Set();
         const deduped = [];
-        for (const [op, path, node] of plan) {
-            const key = `${op}|${path}`;
+        for (const entry of plan) {
+            const [op, path, , label, field] = entry;
+            const key = `${op}|${path}|${label}|${field}`;
             if (seen.has(key)) {
                 continue;
             }
             seen.add(key);
-            deduped.push([op, path, node]);
+            deduped.push(entry);
         }
-        const replacePaths = deduped.filter(([op]) => op === 'replace').map(([, p]) => p);
-        const covered = deduped.filter(([, path]) => !replacePaths.some(
-            (other) => other !== path && path.startsWith(`${other}.`),
+        const replacePaths = new Set(
+            deduped.filter(([op]) => op === 'replace').map(([, p]) => p),
+        );
+        const rowOps = new Set(['cell', 'row_replace', 'row_insert', 'row_remove']);
+        const covered = deduped.filter(([op, path]) => !(
+            [...replacePaths].some((other) => other !== path && path.startsWith(`${other}.`))
+            || (rowOps.has(op) && replacePaths.has(path))
         ));
 
         const patches = [];
-        covered.forEach(([op, path, node], position) => {
+        for (let position = 0; position < covered.length; position += 1) {
+            const [op, path, node, label, field] = covered[position];
+            if (op === 'cell') {
+                // Value-only patch: no body, no render, no re-registration.
+                const base = node.getAttr('id') || this.targetId(node);
+                const specs = (this._cellMap[base] || {})[field];
+                if (!specs) {
+                    // A cell the catalog does not know (templates, checked,
+                    // richer cells): fall back to the row replace.
+                    const fragment = renderer.renderExpansionBlock(node, label, o);
+                    patches.push({ id: `${base}.${label}.1`, op: 'replace', node: fragment });
+                    continue;
+                }
+                const anchorAbs = node.absDatapath(node.getAttr('iterate'));
+                const dataNode = this.handler.data.getNode(`${anchorAbs}.${label}.${field}`);
+                const value = dataNode ? dataNode.value : null;
+                // DIFF-PYTHON: _present_value / mask is a later slice — raw value.
+                const text = value === null || value === undefined ? '' : String(value);
+                for (const [ordinal, cellKind, attrName] of specs) {
+                    const cellId = `${base}.${label}.${ordinal}`;
+                    if (cellKind === 'text') {
+                        patches.push({ id: cellId, op: 'text', value: text });
+                    } else {
+                        patches.push({ id: cellId, op: 'attr', name: attrName, value: text });
+                    }
+                }
+                continue;
+            }
+            if (op === 'row_remove') {
+                // Derived identity needs no capture at the delete event: the
+                // address is arithmetic. The dead row's writeback entries die
+                // here (no re-expansion will purge them).
+                const base = node.getAttr('id') || this.targetId(node);
+                patches.push({ id: `${base}.${label}.1`, op: 'remove' });
+                this._purgeWritebackPrefix(`${base}.${label}`);
+                continue;
+            }
+            if (op === 'row_replace' || op === 'row_insert') {
+                const base = node.getAttr('id') || this.targetId(node);
+                const fragment = renderer.renderExpansionBlock(node, label, o);
+                if (op === 'row_replace') {
+                    patches.push({ id: `${base}.${label}.1`, op: 'replace', node: fragment });
+                    continue;
+                }
+                const [before, fallback] = this._rowInsertAnchor(node, base, label);
+                const container = node.parentBag.parentNode;
+                if (fallback) {
+                    // No anchorable element after the block (a component
+                    // sibling follows): the container replace is the unit.
+                    if (container === null || container === undefined) {
+                        return this.render(opts);
+                    }
+                    const whole = renderer.render(container, o);
+                    patches.push({ id: this.targetId(container), op: 'replace', node: whole });
+                    continue;
+                }
+                const containerId = container !== null && container !== undefined
+                    ? this.targetId(container) : null;
+                patches.push({ id: containerId, op: 'insert', before, node: fragment });
+                continue;
+            }
             if (op === 'remove') {
                 const targetId = this.handler.removedTargetId(this.name, path);
                 if (targetId === null || targetId === undefined) {
-                    return;   // never rendered with identity: nothing in the DOM
+                    continue;   // never rendered with identity: nothing in the DOM
                 }
                 patches.push({ id: targetId, op: 'remove' });
-                return;
+                continue;
             }
             if (op === 'insert') {
                 const pending = new Set(
@@ -639,19 +721,19 @@ export class BuilderBase {
                 const [before] = this._insertAnchor(node, pending);
                 const fragment = renderer.render(node, o);
                 if (fragment === null) {
-                    return;
+                    continue;
                 }
                 const container = node.parentBag.parentNode;
                 const containerId = path.includes('.') ? this.targetId(container) : null;
                 patches.push({ id: containerId, op: 'insert', before, node: fragment });
-                return;
+                continue;
             }
             const fragment = renderer.render(node, o);
             if (fragment === null) {
-                return;
+                continue;
             }
             patches.push({ id: this.targetId(node), op: 'replace', node: fragment });
-        });
+        }
         effTarget.partial(patches);
         return null;
     }
@@ -675,6 +757,24 @@ export class BuilderBase {
             return [this.targetId(sib), false];
         }
         return [null, false];
+    }
+
+    /** Anchor for a row-insert patch: [beforeId, fallback]. The new row
+     *  lands before the block of the row that FOLLOWS it in the
+     *  collection's bag order (derived id, pure arithmetic). After the LAST
+     *  row the anchor is the first renderable source sibling following the
+     *  component; a component sibling has no anchorable id — `fallback`
+     *  tells the caller to replace the container instead. before=null
+     *  appends at the end. */
+    _rowInsertAnchor(compNode, base, label) {
+        const anchorAbs = compNode.absDatapath(compNode.getAttr('iterate'));
+        const collection = this.handler.data.getItem(anchorAbs);
+        const labels = collection.keys();
+        const index = labels.indexOf(label);
+        if (index + 1 < labels.length) {
+            return [`${base}.${labels[index + 1]}.1`, false];
+        }
+        return this._insertAnchor(compNode, new Set());
     }
 
     // --- expansion write-back index (CMP.7) --------------------------
