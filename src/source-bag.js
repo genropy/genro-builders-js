@@ -325,6 +325,13 @@ export function wrapSource(target) {
             if (tag) {
                 return elementCall(builder, obj, tag, onBag);
             }
+            // @container: a body-carrying method that GENERATES source at
+            // call time (legacy gnrwebstruct parity). It runs with the
+            // target (wrapped, so its body can dispatch tags) as first arg.
+            const method = builder.containerMethod(prop);
+            if (method) {
+                return (...args) => builder[method](wrapSource(obj), ...args);
+            }
             return undefined;
         },
     });

@@ -104,6 +104,33 @@ export class BuilderBase {
     // The data-elements are grammar of the base, inherited by every dialect.
     static { this.defineGrammar(BASE_GRAMMAR); }
 
+    /** Map lowercase → method name for the @containers declared along the
+     *  class chain via `static containers = [...]` (subclass wins). */
+    get _containers() {
+        if (!Object.hasOwn(this.constructor, '_containerMap')) {
+            const map = {};
+            let cls = this.constructor;
+            while (cls && cls !== Function.prototype) {
+                if (Object.hasOwn(cls, 'containers') && Array.isArray(cls.containers)) {
+                    for (const name of cls.containers) {
+                        const key = name.toLowerCase();
+                        if (!(key in map)) {
+                            map[key] = name;
+                        }
+                    }
+                }
+                cls = Object.getPrototypeOf(cls);
+            }
+            this.constructor._containerMap = map;
+        }
+        return this.constructor._containerMap;
+    }
+
+    /** The method name for the container `name`, or null. */
+    containerMethod(name) {
+        return this._containers[name.toLowerCase()] || null;
+    }
+
     get schema() {
         return this.constructor._classSchema || {};
     }
