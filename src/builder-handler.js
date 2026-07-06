@@ -15,15 +15,57 @@
  *  ancestor-cover + density coalescing) then flushes each touched
  *  builder via `renderNodes`.
  *
- * Not-yet-ported (later slices): component rules (per-row data-elements)
- * and lazy iterate. The row/cell classification (`_expansionRow`) is
- * here; the fine DOM patch application lands in `renderNodes` (patch ops).
+ * Row logic of the expansions is here too (CMP.7): `setComponentRules`
+ * compiles the per-row data-elements into TEMPLATES, `_runComponentRules`
+ * dispatches them by coordinates in the cascade. Not-yet-ported: lazy
+ * iterate.
  */
 import { Bag } from 'genro-bag-js';
+
+import { META_ATTRS } from './source-bag.js';
+import { DATA_ELEMENT_FIELDS } from './builder-base.js';
 
 /** A formula re-queued more than this many times in one flush is a
  *  livelock (a → b → a): the drain raises, naming the func. */
 const FORMULA_REQUEUE_LIMIT = 50;
+
+/** The `node` a row-rule controller receives. Template rules execute
+ *  against ANY row, so the controller cannot get a retained source node
+ *  (its relative paths would resolve against the registration row). This
+ *  context carries the reactive vocabulary bound to the EVENT's row
+ *  coordinates: `.x`/`?a` resolve on the row, plain paths on the segment. */
+class RowContext {
+    constructor(data, segment, rowPath, builder = null) {
+        this._data = data;
+        this._segment = segment;
+        this._rowPath = rowPath;
+        this._builder = builder;
+    }
+
+    get builder() {
+        return this._builder;
+    }
+
+    _abs(path) {
+        if (path.startsWith('.') || path.startsWith('?')) {
+            if (this._rowPath === null || this._rowPath === undefined) {
+                throw new Error(`row-relative path ${path} in a rule with no row`);
+            }
+            return this._rowPath + path;
+        }
+        return `${this._segment}.${path}`;
+    }
+
+    // setItem(path, value, attr, nodePosition, updattr, removeNullAttributes,
+    // reason, fired): SET/FIRE carry reason=true, PUT reason=false.
+    GET(path) { return this._data.getItem(this._abs(path)); }
+
+    SET(path, value) { this._data.setItem(this._abs(path), value, null, '>', false, true, true, false); }
+
+    PUT(path, value) { this._data.setItem(this._abs(path), value, null, '>', false, true, false, false); }
+
+    FIRE(path, value = true) { this._data.setItem(this._abs(path), value, null, '>', false, true, true, true); }
+}
 
 /** Above this many touched rows of ONE component in a single flush, the
  *  per-row patches coalesce into the enclosing-container replace (the
@@ -54,6 +96,15 @@ export class BuilderHandler {
         // Formula cascade: FIFO queue drained at the live() flush.
         this._formulaQueue = [];
         this._pendingFormulas = new Set();
+        // Row logic of the expansions (CMP.7), per-COMPONENT templates: the
+        // body is code, so the rule of row 45 IS the rule of row 46 — ONE
+        // spec per rule per component. The event's coordinates (anchor →
+        // row label → field) resolve which rules run and on which row.
+        // Shared bindings (a header rate) are the absolute entries: one
+        // event runs the spec over every live row.
+        this.componentRules = new Map();       // anchor → {storeMode, specs, byField}
+        this.sharedRules = new Map();          // trigger → [[owner, anchor, spec]]
+        this._specSerial = 0;                  // stable id for the formula dedup key
     }
 
     get data() {
@@ -212,7 +263,7 @@ export class BuilderHandler {
                     continue;
                 }
                 if (node.nodeTag === 'dataFormula' && this._liveDepth) {
-                    this._enqueueFormula(node, builder);
+                    this._enqueueFormula(node, 'node', builder, node);
                 } else {
                     builder.computeLogic([node]);
                 }
@@ -220,33 +271,270 @@ export class BuilderHandler {
         }
     }
 
-    /** Queue one formula, deduped on the node (a pending key does not
-     *  queue twice; it will read the settled inputs when it drains). */
-    _enqueueFormula(node, builder) {
-        if (this._pendingFormulas.has(node)) {
+    /** Queue one formula execution, deduped on `key` (a page data-element
+     *  node, or a `${specId}|${rowPath}` for a row rule). A pending key does
+     *  not queue twice; it will read the settled inputs when it drains. */
+    _enqueueFormula(key, kind, owner, payload) {
+        if (this._pendingFormulas.has(key)) {
             return;
         }
-        this._pendingFormulas.add(node);
-        this._formulaQueue.push([node, builder]);
+        this._pendingFormulas.add(key);
+        this._formulaQueue.push({ key, kind, owner, payload });
     }
 
     /** Drain the queued formulas FIFO until dry. Their writes re-enter the
-     *  cascade (formulas re-queue, controllers run at once). A key draining
-     *  more than FORMULA_REQUEUE_LIMIT times is a livelock → explicit error. */
+     *  cascade (formulas re-queue, controllers run at once). A rule whose
+     *  row DIED while queued runs nothing (the existence check is the
+     *  resurrection guard). A key draining more than FORMULA_REQUEUE_LIMIT
+     *  times is a livelock → explicit error. */
     _drainFormulas() {
         const counts = new Map();
         while (this._formulaQueue.length) {
-            const [node, builder] = this._formulaQueue.shift();
-            this._pendingFormulas.delete(node);
-            const n = (counts.get(node) || 0) + 1;
-            counts.set(node, n);
+            const { key, kind, owner, payload } = this._formulaQueue.shift();
+            this._pendingFormulas.delete(key);
+            const n = (counts.get(key) || 0) + 1;
+            counts.set(key, n);
             if (n > FORMULA_REQUEUE_LIMIT) {
+                const name = kind === 'rule'
+                    ? `rule '${owner.func.name}' on ${payload}`
+                    : `data-element '${payload.getAttr('func')}'`;
                 throw new Error(
-                    `formula livelock: '${node.getAttr('func')}' re-queued more `
-                    + `than ${FORMULA_REQUEUE_LIMIT} times in one flush`,
+                    `formula livelock: ${name} re-queued more than `
+                    + `${FORMULA_REQUEUE_LIMIT} times in one flush`,
                 );
             }
-            builder.computeLogic([node]);
+            if (kind === 'rule') {
+                if (payload !== null && !this._dataroot.getNode(payload)) {
+                    continue;          // the row died while queued
+                }
+                this._executeRule(owner, payload);
+            } else {
+                owner.computeLogic([payload]);
+            }
+        }
+    }
+
+    // --- component rules (per-row data-elements, CMP.7) --------------
+
+    /** Register a component's rules as TEMPLATES. Idempotent: every
+     *  expansion rebuilds its component's entry (the body is code, every
+     *  row builds the same rules — the last wins; the owner's stale shared
+     *  entries prune first). `anchor` keys the coordinate dispatch (null =
+     *  an unanchored component); `rowPrefix` is the registration row's
+     *  absolute path, the residualization base. */
+    setComponentRules(owner, anchor, storeMode, ruleNodes, rowPrefix) {
+        const specs = ruleNodes.map((node) => this._ruleSpec(node, rowPrefix));
+        const byField = new Map();
+        for (const spec of specs) {
+            for (const suffix of spec.rowTriggers) {
+                if (!byField.has(suffix)) {
+                    byField.set(suffix, []);
+                }
+                byField.get(suffix).push(spec);
+            }
+        }
+        for (const [trigger, entries] of [...this.sharedRules]) {
+            const kept = entries.filter((e) => e[0] !== owner);
+            if (kept.length) {
+                this.sharedRules.set(trigger, kept);
+            } else {
+                this.sharedRules.delete(trigger);
+            }
+        }
+        for (const spec of specs) {
+            for (const trigger of spec.sharedTriggers) {
+                if (!this.sharedRules.has(trigger)) {
+                    this.sharedRules.set(trigger, []);
+                }
+                this.sharedRules.get(trigger).push([owner, anchor, spec]);
+            }
+        }
+        if (anchor !== null && anchor !== undefined) {
+            this.componentRules.set(anchor, { storeMode, specs, byField });
+        }
+    }
+
+    /** Compile a data-element node into a template spec. Bindings
+     *  residualize against the registration row: a pointer under `rowPrefix`
+     *  becomes a ROW suffix (the same for every row — the body is code),
+     *  anything else stays absolute; non-pointer attributes ride as
+     *  constants. Reactive (`^`) bindings are the triggers; passive (`=`)
+     *  ones read at execution only. The func resolves NOW. */
+    _ruleSpec(node, rowPrefix) {
+        const builder = node.builder;
+        const kind = node.nodeTag.replace(/^data/, '').toLowerCase();   // formula | controller
+        const func = builder._resolveLogicFunc(node.getAttr('func'));
+        const classify = (path) => {
+            const absPath = node.absDatapath(path);
+            if (rowPrefix && absPath.startsWith(rowPrefix)) {
+                const suffix = absPath.slice(rowPrefix.length);
+                if (suffix.startsWith('.') || suffix.startsWith('?')) {
+                    return ['row', suffix];
+                }
+            }
+            return ['abs', absPath];
+        };
+        const bindings = [];
+        const rowTriggers = [];
+        const sharedTriggers = [];
+        for (const [name, raw] of Object.entries(node.getAttr() || {})) {
+            if (DATA_ELEMENT_FIELDS.has(name) || META_ATTRS.has(name)) {
+                continue;
+            }
+            const pointerKind = node.pointerType(raw);
+            if (pointerKind === null) {
+                bindings.push([name, 'const', raw]);
+                continue;
+            }
+            const [mode, payload] = classify(raw);
+            bindings.push([name, mode, payload]);
+            if (pointerKind === '^') {
+                if (mode === 'row') {
+                    // the by-field index key: the event field arrives without
+                    // the leading dot
+                    rowTriggers.push(payload.replace(/^\./, ''));
+                } else {
+                    sharedTriggers.push(payload);
+                }
+            }
+        }
+        let destination = null;
+        if (kind === 'formula') {
+            destination = classify(node.getAttr('destination'));
+        }
+        this._specSerial += 1;
+        return {
+            _id: this._specSerial, kind, func, bindings, destination,
+            rowTriggers, sharedTriggers, segment: node.rootBuilderName,
+        };
+    }
+
+    /** Coordinate dispatch (CMP.7): the event path DECOMPOSES. Walk the
+     *  path's prefixes for the deepest registered anchor; the next segment
+     *  is the row, the rest the field. A DEAD row runs nothing (existence
+     *  check = resurrection guard). Shared triggers resolve from their own
+     *  registry, each spec running over every live row of its component. */
+    _runComponentRules(path) {
+        const segments = path.split('.');
+        for (let cut = segments.length - 1; cut > 0; cut -= 1) {
+            const anchor = segments.slice(0, cut).join('.');
+            const component = this.componentRules.get(anchor);
+            if (!component) {
+                continue;
+            }
+            const residual = segments.slice(cut);
+            let rowPath;
+            let field;
+            if (component.storeMode) {
+                rowPath = anchor;
+                field = residual.join('.');
+            } else {
+                rowPath = `${anchor}.${residual[0]}`;
+                field = residual.slice(1).join('.');
+            }
+            if (this._dataroot.getNode(rowPath)) {
+                for (const spec of this._rulesFor(component, field)) {
+                    this._dispatchRule(spec, rowPath);
+                }
+            }
+            break;
+        }
+        const matched = [];
+        for (const [trigger, entries] of this.sharedRules) {
+            const stripped = trigger.split('?')[0];
+            if (stripped === path || stripped.startsWith(`${path}.`)) {
+                matched.push(...entries);
+            }
+        }
+        const seen = new Set();
+        for (const [, anchor, spec] of matched) {
+            if (seen.has(spec)) {
+                continue;
+            }
+            seen.add(spec);
+            this._runSharedRule(spec, anchor);
+        }
+    }
+
+    /** The specs the mutated `field` triggers, deduped in order: exact hit
+     *  on the by-field index, plus bindings sitting UNDER the mutated field
+     *  (a container replaced wholesale). No field → every spec of the
+     *  component (a wholesale row replace / upd_attrs). */
+    _rulesFor(component, field) {
+        if (!field) {
+            return [...new Set(component.specs)];
+        }
+        const hits = [...(component.byField.get(field) || [])];
+        for (const [suffix, specs] of component.byField) {
+            if (suffix === field) {
+                continue;
+            }
+            const stripped = suffix.split('?')[0];
+            if (stripped === field || stripped.startsWith(`${field}.`)) {
+                hits.push(...specs);
+            }
+        }
+        return [...new Set(hits)];
+    }
+
+    /** Run a controller now, queue a formula (inside a live section). A
+     *  command is not a function of the state (controllers stay
+     *  synchronous); a formula IS (it defers to the flush drain). */
+    _dispatchRule(spec, rowPath) {
+        if (spec.kind === 'formula' && this._liveDepth) {
+            this._enqueueFormula(`${spec._id}|${rowPath}`, 'rule', spec, rowPath);
+        } else {
+            this._executeRule(spec, rowPath);
+        }
+    }
+
+    /** A shared trigger fired: run the spec over its component. An iterate
+     *  component runs it once per LIVE row; a store component on the store;
+     *  an unanchored one once with no row. */
+    _runSharedRule(spec, anchor) {
+        if (anchor === null || anchor === undefined) {
+            this._dispatchRule(spec, null);
+            return;
+        }
+        const component = this.componentRules.get(anchor);
+        if (!component || component.storeMode) {
+            this._dispatchRule(spec, anchor);
+            return;
+        }
+        const collection = this._dataroot.getItem(anchor);
+        if (collection === null || collection === undefined) {
+            return;
+        }
+        for (const label of collection.keys()) {
+            this._dispatchRule(spec, `${anchor}.${label}`);
+        }
+    }
+
+    /** Run one template spec on one row: read, compute, write. Everything
+     *  resolves by coordinates — row suffixes on `rowPath`, absolutes as
+     *  they are, constants as themselves. A controller's `node` is a
+     *  RowContext bound to the same coordinates. The writes re-enter the
+     *  cascade as any canonical data-element write. */
+    _executeRule(spec, rowPath) {
+        const kwargs = {};
+        for (const [name, mode, payload] of spec.bindings) {
+            if (mode === 'const') {
+                kwargs[name] = payload;
+            } else if (mode === 'row') {
+                kwargs[name] = this._dataroot.getItem(rowPath + payload);
+            } else {
+                kwargs[name] = this._dataroot.getItem(payload);
+            }
+        }
+        if (spec.kind === 'formula') {
+            const [mode, payload] = spec.destination;
+            const dest = mode === 'row' ? rowPath + payload : payload;
+            this._dataroot.setItem(dest, spec.func(kwargs), null, '>', false, true, true, false);
+        } else {
+            const context = new RowContext(
+                this._dataroot, spec.segment, rowPath, this.builders[spec.segment],
+            );
+            spec.func(context, kwargs);
         }
     }
 
@@ -259,8 +547,10 @@ export class BuilderHandler {
             ? [...pathlist, node.label].join('.')
             : pathlist.join('.');
         const relevant = this._relevantNodes(path);
-        // Recompute the data-element readers first (their writes re-enter
-        // here and cascade); then queue the view readers for the render.
+        // Row rules first (they run ahead of the wide page readers that
+        // depend on their writes), then the page data-element readers
+        // (their writes re-enter here and cascade), then the view readers.
+        this._runComponentRules(path);
         this.executeLogic(relevant);
         for (const [, items] of relevant) {
             for (const [, viewNode] of items) {

@@ -49,7 +49,7 @@ const BASE_GRAMMAR = {
 };
 
 /** Schema fields of a data-element, stripped from the func bindings. */
-const DATA_ELEMENT_FIELDS = new Set(['destination', 'func', 'value', '_on_start']);
+export const DATA_ELEMENT_FIELDS = new Set(['destination', 'func', 'value', '_on_start']);
 
 /** A bare identifier is a func NAME (resolved via data_logic); anything
  *  else is a JS code string, compiled to a function. */

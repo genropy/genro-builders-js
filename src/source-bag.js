@@ -25,7 +25,7 @@ const RESERVED = new Set([
 export const VALUE = Symbol('value');
 
 /** Structural attributes that never reach the rendered markup. */
-const META_ATTRS = new Set([
+export const META_ATTRS = new Set([
     '_meta', 'datapath', 'node_id', 'ns', 'form', 'formId', '_anchor', 'updateOn',
 ]);
 

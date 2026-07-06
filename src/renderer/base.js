@@ -266,9 +266,19 @@ export class RendererBase {
                 queue.push(...current.value.getNodes());
             }
         }
-        // component rules (per-row data-elements): the next slice consumes
-        // `ruleNodes` via handler.setComponentRules.
-        void ruleNodes;
+        // Register the row logic as TEMPLATES (per component): the body is
+        // code, so one spec per rule runs on ANY row (CMP.7).
+        if (handler) {
+            const rawAnchor = compNode.getAttr('iterate') || compNode.getAttr('store');
+            const anchorAbs = rawAnchor ? compNode.absDatapath(rawAnchor) : null;
+            const rowPrefix = labels.length
+                ? `${anchorAbs}.${labels[labels.length - 1]}` : anchorAbs;
+            handler.setComponentRules(
+                String(base), anchorAbs,
+                Boolean(rawAnchor) && labels.length === 0,
+                ruleNodes, rowPrefix,
+            );
+        }
     }
 
     /** Catalog a patchable CELL: in-row field → (ordinal, op). The body is
