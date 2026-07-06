@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>genro-builders-js — reactive genro</title>
+  <title>genro-dom-js — reactive genro</title>
   <!--
     Serve over http from sub-projects/, e.g.
       python3 -m http.server 8010 --directory .../sub-projects
-    then open /genro-builders-js/examples/test.html
+    then open /genro-dom-js/examples/test.html
   -->
   <script type="importmap">
   {
     "imports": {
-      "genro-builders-js": "../src/index.js",
+      "genro-dom-js": "../src/index.js",
       "genro-bag-js": "../../genro-bag-js/src/index.js",
       "genro-tytx": "../../genro-tytx/js/src/index.js",
       "module": "./shims/module.js",
@@ -46,7 +46,7 @@
   <div id="root"></div>
 
   <script type="module">
-    import { Application, HtmlBuilder } from 'genro-builders-js';
+    import { Application, HtmlBuilder } from 'genro-dom-js';
 
     class Page extends HtmlBuilder {
       setup() {

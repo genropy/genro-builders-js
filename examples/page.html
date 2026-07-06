@@ -8,7 +8,7 @@
   <script type="importmap">
   {
     "imports": {
-      "genro-builders-js": "../src/index.js",
+      "genro-dom-js": "../src/index.js",
       "genro-bag-js": "../../genro-bag-js/src/index.js",
       "genro-tytx": "../../genro-tytx/js/src/index.js",
       "module": "./shims/module.js",
@@ -24,7 +24,7 @@
 <body>
   <div id="root"></div>
   <script type="module">
-    import { Application } from 'genro-builders-js';
+    import { Application } from 'genro-dom-js';
 
     const name = new URLSearchParams(location.search).get('name') || 'basic';
     const mod = await import(`./pages/${name}.js`);

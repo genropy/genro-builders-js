@@ -1,6 +1,6 @@
-# genro-builders-js for Vue developers
+# genro-dom-js for Vue developers
 
-You know Vue. This page maps what you know onto genro-builders-js — Vue's
+You know Vue. This page maps what you know onto genro-dom-js — Vue's
 reactivity instincts transfer well here, better than React's; the real
 difference is *where the template lives*.
 
@@ -10,7 +10,7 @@ Vue compiles a template into a render function; when a reactive dependency
 changes, the component's render function re-runs and Vue patches the DOM
 through the virtual tree.
 
-genro-builders-js has no template language and no render function to
+genro-dom-js has no template language and no render function to
 re-run: `main()` runs **once** and produces a data structure (the *source
 Bag* — the "recipe"). Think of it as your template *after* compilation,
 except it is plain hierarchical data, serializable, and even producible by
@@ -18,7 +18,7 @@ a Python server. Reactivity skips the component layer entirely: each
 `^pointer` binding maps a datum to its DOM nodes, and a write patches those
 nodes directly.
 
-| Vue | genro-builders-js |
+| Vue | genro-dom-js |
 |---|---|
 | `<template>` | fluent grammar calls (`root.div(...)`) |
 | SFC (one component per file) | one `Page` class per file |
@@ -50,10 +50,10 @@ const name = ref('World');
 </template>
 ```
 
-genro-builders-js:
+genro-dom-js:
 
 ```js
-import { HtmlBuilder, Application } from 'genro-builders-js';
+import { HtmlBuilder, Application } from 'genro-dom-js';
 
 class Page extends HtmlBuilder {
     setup() {
@@ -139,7 +139,7 @@ Vue:
 </div>
 ```
 
-genro-builders-js:
+genro-dom-js:
 
 ```js
 class Page extends HtmlBuilder {

@@ -1,4 +1,4 @@
-# genro-builders-js
+# genro-dom-js
 
 A JavaScript UI library where **the page is data, not code**.
 
@@ -9,7 +9,7 @@ builds real DOM. A reactive engine keeps the DOM alive: every change in the
 datastore becomes a surgical patch on exactly the DOM nodes bound to it —
 no virtual DOM, no re-render, no diffing.
 
-genro-builders-js is the JavaScript counterpart of the Python
+genro-dom-js is the JavaScript counterpart of the Python
 [genro-builders](https://github.com/softwellsrl/genro-builders) package.
 Because the recipe is data, the *same* page can be authored in JS in the
 browser or generated in Python on the server, serialized, and rendered by
@@ -26,7 +26,7 @@ collections). The API may still change.
 ## A taste
 
 ```js
-import { HtmlBuilder, Application } from 'genro-builders-js';
+import { HtmlBuilder, Application } from 'genro-dom-js';
 
 class Page extends HtmlBuilder {
     setup() {
@@ -121,11 +121,11 @@ Two flavours of reusable structure:
 ## Running the examples
 
 No build step — the library is plain ES modules. From the directory that
-contains `genro-builders-js` and its sibling `genro-bag-js`:
+contains `genro-dom-js` and its sibling `genro-bag-js`:
 
 ```sh
 python3 -m http.server 8010
-# then open http://localhost:8010/genro-builders-js/examples/index.html
+# then open http://localhost:8010/genro-dom-js/examples/index.html
 ```
 
 ## Tests
@@ -142,8 +142,8 @@ npm test        # node --test on jsdom (real DOM)
 
 ## Coming from React or Vue?
 
-- [genro-builders-js for React developers](docs/for-react-developers.md)
-- [genro-builders-js for Vue developers](docs/for-vue-developers.md)
+- [genro-dom-js for React developers](docs/for-react-developers.md)
+- [genro-dom-js for Vue developers](docs/for-vue-developers.md)
 
 ## License
 

@@ -1,4 +1,4 @@
-# Claude Code Instructions - genro-builders-js
+# Claude Code Instructions - genro-dom-js
 
 **Parent Document**: This project follows all policies from the central [meta-genro-modules CLAUDE.md](https://github.com/softwellsrl/meta-genro-modules/blob/main/CLAUDE.md)
 
@@ -20,7 +20,7 @@ turns data/structure changes into per-node DOM patches. Depends on
 ## Architecture (mirrors the current Python genro-builders)
 
 ```
-genro-builders-js/
+genro-dom-js/
   src/
     index.js            # public API exports
     source-bag.js       # SourceBag / SourceBagNode (on bag-js) + grammar Proxy

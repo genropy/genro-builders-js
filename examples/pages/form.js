@@ -4,7 +4,7 @@
 //  - 'input': writes live, on each keystroke (search-as-you-type).
 // Each input carries the origin as the write's reason → it does not
 // re-render on its own change (anti-echo): focus/cursor survive.
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 
 export const title = 'Form — write-back + updateOn (blur / input)';
 

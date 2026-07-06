@@ -1,4 +1,4 @@
-# genro-builders-js
+# genro-dom-js
 
 A JavaScript UI library where **the page is data, not code**.
 
@@ -15,7 +15,7 @@ maintaining the library as much as the developers using it.
 
 ```{note}
 Status: **Alpha**. The core is implemented and tested; the API may still
-change. genro-builders-js is the JavaScript twin of the Python
+change. genro-dom-js is the JavaScript twin of the Python
 [genro-builders](https://github.com/softwellsrl/genro-builders) package —
 the same recipe can be authored in JS or generated in Python and rendered
 here unchanged.

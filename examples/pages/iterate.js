@@ -3,7 +3,7 @@
 // block anchored to its row (datapath = anchor + node_label). Mutating the
 // collection (add / remove / change a field) refreshes the blocks — the
 // component's anchor subscription catches mutations no reader declared.
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 
 export const title = 'Iterate — @component su una collezione';
 

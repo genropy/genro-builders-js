@@ -2,7 +2,7 @@
 // Gallery: every widget of the plugged collections, laid out in a flex
 // grid. Each cell = title + widget (value/checked bound to a datum) + a
 // live reader of that datum. Shows the whole family + write-back at once.
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 import '../../src/collections/inputs.js';
 import '../../src/collections/colorpicker.js';
 

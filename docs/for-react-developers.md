@@ -1,6 +1,6 @@
-# genro-builders-js for React developers
+# genro-dom-js for React developers
 
-You know React. This page maps what you know onto genro-builders-js — and
+You know React. This page maps what you know onto genro-dom-js — and
 points out where the model is genuinely different, not just differently
 spelled.
 
@@ -10,14 +10,14 @@ React's mental model: **UI = f(state)**. When state changes, the component
 function re-runs, produces a new virtual tree, and React diffs it against
 the previous one to find what to patch.
 
-genro-builders-js: **the page builds once**. `main()` runs a single time and
+genro-dom-js: **the page builds once**. `main()` runs a single time and
 produces a data structure (the *source Bag* — think of it as a JSX tree that
 is pure data and never re-created). Reactivity does not re-run anything:
 every `^pointer` binding is registered in a pointer map, and a data write
 patches exactly the DOM nodes bound to it. There is no reconciliation
 because there is nothing to reconcile.
 
-| React | genro-builders-js |
+| React | genro-dom-js |
 |---|---|
 | Component function | `Page` class / component method |
 | JSX | fluent grammar calls (`root.div(...)`) |
@@ -46,10 +46,10 @@ function Hello() {
 }
 ```
 
-genro-builders-js:
+genro-dom-js:
 
 ```js
-import { HtmlBuilder, Application } from 'genro-builders-js';
+import { HtmlBuilder, Application } from 'genro-dom-js';
 
 class Page extends HtmlBuilder {
     setup() {
@@ -100,7 +100,7 @@ React:
 {states.map(s => <Row key={s.id} state={s} />)}
 ```
 
-genro-builders-js:
+genro-dom-js:
 
 ```js
 class Page extends HtmlBuilder {

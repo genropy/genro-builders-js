@@ -2,18 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>genro-builders-js — pages</title>
+  <title>genro-dom-js — pages</title>
   <!--
     Serve over http from sub-projects/, e.g.
       python3 -m http.server 8010 --directory .../sub-projects
-    then open /genro-builders-js/examples/index.html
+    then open /genro-dom-js/examples/index.html
     Add a page: drop a file in pages/ exporting { title, Page } and list it
     in PAGES below.
   -->
   <script type="importmap">
   {
     "imports": {
-      "genro-builders-js": "../src/index.js",
+      "genro-dom-js": "../src/index.js",
       "genro-bag-js": "../../genro-bag-js/src/index.js",
       "genro-tytx": "../../genro-tytx/js/src/index.js",
       "module": "./shims/module.js",
@@ -45,7 +45,7 @@
   </style>
 </head>
 <body>
-  <h2>genro-builders-js — pagine</h2>
+  <h2>genro-dom-js — pagine</h2>
   <p>Ogni pagina è un file in <code>pages/</code> che esporta <code>{ title, Page }</code>.
      Seleziona una pagina; da console hai <code>genro</code>.</p>
 
@@ -57,7 +57,7 @@
   <div id="root"></div>
 
   <script type="module">
-    import { Application } from 'genro-builders-js';
+    import { Application } from 'genro-dom-js';
 
     // The page registry: import a module per page, list it here.
     const PAGES = {

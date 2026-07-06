@@ -1,4 +1,4 @@
-"""Sphinx configuration for genro-builders-js documentation.
+"""Sphinx configuration for genro-dom-js documentation.
 
 This is a JavaScript project, so there is no Python autodoc: the API
 reference and guides are authored in Markdown (MyST). Diagrams use
@@ -6,7 +6,7 @@ mermaid fenced blocks.
 """
 
 # Project information
-project = "genro-builders-js"
+project = "genro-dom-js"
 copyright = "2025, Genropy Team"
 author = "Genropy Team"
 release = "0.1.0"
@@ -44,4 +44,4 @@ exclude_patterns = [
 
 # HTML output
 html_theme = "sphinx_rtd_theme"
-html_title = "genro-builders-js"
+html_title = "genro-dom-js"

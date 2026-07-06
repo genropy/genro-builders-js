@@ -2,7 +2,7 @@
 // Typed widgets as web components, plugged with `wc_requires`. Each tag
 // projects to a native custom element (<gnr-datetextbox> …); value rides
 // the pointer, the write-back + updateOn are the same as for a plain input.
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 import '../../src/collections/inputs.js';        // registers 'inputs'
 import '../../src/collections/colorpicker.js';   // registers 'colorpicker'
 

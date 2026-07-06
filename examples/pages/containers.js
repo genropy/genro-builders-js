@@ -3,7 +3,7 @@
 //  - @container (call-time): real HTML source, fillable handle
 //  - container web component (slot): encapsulated custom element with children
 //  - widget web components inside a container, with live write-back
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 import '../../src/collections/layout.js';        // panel, box
 import '../../src/collections/inputs.js';         // textBox, dateTextBox…
 

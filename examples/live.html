@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
   <meta charset="utf-8">
-  <title>genro-builders-js — live playground</title>
+  <title>genro-dom-js — live playground</title>
   <!--
     Playground: editor (sinistra) → render live (destra). Tutto LOCALE, zero
     rete: la preview integrata dell'IDE è sandboxata (nessun host esterno),
@@ -10,7 +10,7 @@
     import-map con path locali (come gli altri esempi).
     Servi da sub-projects/ (i moduli fratelli bag-js/tytx stanno lì):
       python3 -m http.server 8010 --directory .../sub-projects
-    poi apri  http://localhost:8010/genro-builders-js/examples/live.html
+    poi apri  http://localhost:8010/genro-dom-js/examples/live.html
     (file:// non va: gli ES module richiedono http/CORS.)
   -->
   <link rel="stylesheet" href="./vendor/codemirror/lib/codemirror.css">
@@ -19,7 +19,7 @@
   <script type="importmap">
   {
     "imports": {
-      "genro-builders-js": "../src/index.js",
+      "genro-dom-js": "../src/index.js",
       "genro-bag-js": "../../genro-bag-js/src/index.js",
       "genro-tytx": "../../genro-tytx/js/src/index.js",
       "module": "./shims/module.js",
@@ -55,7 +55,7 @@
 </head>
 <body>
   <header>
-    <h1>genro-builders-js · live</h1>
+    <h1>genro-dom-js · live</h1>
     <span class="hint">la ricetta si riesegue al blur dell'editor o con Ctrl/Cmd-Enter</span>
     <button id="run">Esegui</button>
   </header>
@@ -73,7 +73,7 @@
   <pre id="errors" hidden></pre>
 
   <script type="module">
-    import { HtmlBuilder, SvgBuilder, Application, wrapSource } from 'genro-builders-js';
+    import { HtmlBuilder, SvgBuilder, Application, wrapSource } from 'genro-dom-js';
     import { Bag } from 'genro-bag-js';
     // Register the web-component collections so a recipe can declare them
     // via `static wc_requires = [...]` (the recipe, compiled with new Function,

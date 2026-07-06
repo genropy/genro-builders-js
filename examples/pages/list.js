@@ -1,7 +1,7 @@
 // Copyright 2025 Softwell S.r.l. - SPDX-License-Identifier: Apache-2.0
 // Structural reactivity: a list whose items are added/removed at runtime,
 // each mutation emitting an insert/remove patch (not a full re-render).
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 
 export const title = 'List — structural insert/remove';
 

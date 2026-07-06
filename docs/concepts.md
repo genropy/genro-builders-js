@@ -11,7 +11,7 @@ component tree. You are producing a **source Bag**: a hierarchical,
 serializable data structure that *describes* the page. This is the recipe.
 
 ```js
-import { HtmlBuilder, Application } from 'genro-builders-js';
+import { HtmlBuilder, Application } from 'genro-dom-js';
 
 class Page extends HtmlBuilder {
     setup() {

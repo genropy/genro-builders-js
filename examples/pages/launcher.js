@@ -6,7 +6,7 @@
 // opening a tab is an `insert` (structural reactivity). The tab SELECTION
 // is UI state → it lives in the client: a small controller in activate()
 // toggles panel visibility directly on the DOM (the data-widget pattern).
-import { HtmlBuilder } from 'genro-builders-js';
+import { HtmlBuilder } from 'genro-dom-js';
 
 export const title = 'Launcher — tabs con pagine in iframe';
 

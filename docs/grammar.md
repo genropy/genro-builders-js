@@ -58,8 +58,8 @@ corresponding custom elements. A page declares the collections it needs; at
 create time the builder merges their grammar and defines the elements.
 
 ```js
-import 'genro-builders-js/src/collections/inputs.js';   // registers 'inputs'
-import 'genro-builders-js/src/collections/layout.js';    // registers 'layout'
+import 'genro-dom-js/src/collections/inputs.js';   // registers 'inputs'
+import 'genro-dom-js/src/collections/layout.js';    // registers 'layout'
 
 class Page extends HtmlBuilder {
     static wc_requires = ['inputs', 'layout'];
