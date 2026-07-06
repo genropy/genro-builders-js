@@ -12,16 +12,29 @@
  *   `create`) to `_onSourceEvent`, which does mapkeep and calls
  *   `addRenderPath` with kind ins/del/upd.
  * The outermost `live()` exit runs `_optimizeRender` (netting +
- *  ancestor-cover) then flushes each touched builder via `renderNodes`.
+ *  ancestor-cover + density coalescing) then flushes each touched
+ *  builder via `renderNodes`.
  *
- * Not-yet-ported (later slices): formula/controller cascade, component
- * rules, lazy iterate, density coalescing, row/cell netting.
+ * Not-yet-ported (later slices): component rules (per-row data-elements)
+ * and lazy iterate. The row/cell classification (`_expansionRow`) is
+ * here; the fine DOM patch application lands in `renderNodes` (patch ops).
  */
 import { Bag } from 'genro-bag-js';
 
 /** A formula re-queued more than this many times in one flush is a
  *  livelock (a → b → a): the drain raises, naming the func. */
 const FORMULA_REQUEUE_LIMIT = 50;
+
+/** Above this many touched rows of ONE component in a single flush, the
+ *  per-row patches coalesce into the enclosing-container replace (the
+ *  structural flood case). Cell patches never coalesce: value-only ops
+ *  are what a shared-binding broadcast wants to ship. */
+const ROW_COALESCE_LIMIT = 50;
+
+/** Above this many touched CELLS of one row in a single flush, the cell
+ *  patches collapse into that row's replace (one fragment beats
+ *  re-reading and shipping most of the row field by field). */
+const CELLS_PER_ROW_LIMIT = 4;
 
 export class BuilderHandler {
     constructor(application = null) {
@@ -258,9 +271,55 @@ export class BuilderHandler {
                 }
                 const name = viewNode.rootBuilderName;
                 const rel = viewNode.rootBuilder.source.relativePath(viewNode);
-                this.addRenderPath(name, rel);
+                // An iterate-component reader classifies PER ROW (path
+                // arithmetic); every other reader re-renders whole (upd).
+                const row = this._expansionRow(viewNode, path, evt);
+                if (row !== null) {
+                    const [rowKind, label, field] = row;
+                    this.addRenderPath(name, rel, rowKind, label, field);
+                } else {
+                    this.addRenderPath(name, rel);
+                }
             }
         }
+    }
+
+    /** Classify a data event against an iterate component (CMP.7).
+     *
+     *  When the reader is an iterate component and the mutated path falls
+     *  under its anchor, the path arithmetic names the row: the residual's
+     *  first segment is the row label. The kind says what happened — the
+     *  row born (`row_ins`), dead (`row_del`), replaced wholesale
+     *  (`row_upd`), or ONE of its leaves changed (`cell_upd`, the residual
+     *  rest as `field`). Returns null for every other reader (including
+     *  the collection node itself replaced wholesale: the whole block
+     *  re-renders). */
+    _expansionRow(viewNode, path, evt) {
+        if (!viewNode._getMeta('component')) {
+            return null;
+        }
+        const iterate = viewNode.getAttr('iterate');
+        if (iterate === null || iterate === undefined) {
+            return null;
+        }
+        const anchor = viewNode.absDatapath(iterate);
+        if (!path.startsWith(`${anchor}.`)) {
+            return null;
+        }
+        const residual = path.slice(anchor.length + 1);
+        const dot = residual.indexOf('.');
+        const label = dot === -1 ? residual : residual.slice(0, dot);
+        const rest = dot === -1 ? '' : residual.slice(dot + 1);
+        if (rest) {
+            return ['cell_upd', label, rest];
+        }
+        if (evt === 'ins') {
+            return ['row_ins', label, null];
+        }
+        if (evt === 'del') {
+            return ['row_del', label, null];
+        }
+        return ['row_upd', label, null];
     }
 
     // --- render queue + optimizer + flush ----------------------------
@@ -276,8 +335,19 @@ export class BuilderHandler {
         this._nodesToRender[builderName].push({ kind, path, label, field });
     }
 
-    /** Reduce queued entries to the minimal set: per-key netting + ancestor
-     *  cover. (Row/cell netting and density coalescing: later slices.) */
+    /** Reduce the queued entries to the minimal set.
+     *
+     *  Per-key netting first (key = path|label|field — a plain node or ONE
+     *  row/cell of an iterate component): the section's history collapses
+     *  to its net effect (the flush renders the FINAL source state).
+     *
+     *  Then the reductions: exact dedup (the netting map), ancestor covers
+     *  descendant (a whole-node entry covers its rows and cells, a row
+     *  entry covers its cells), and density coalescing — too many cells of
+     *  ONE row collapse into that row's replace, then a structural flood
+     *  of rows collapses into the enclosing-container replace. Cell entries
+     *  never count in the row flood: value-only ops are what a broadcast
+     *  wants to ship. */
     _optimizeRender(entries) {
         const state = new Map();   // key `${path}|${label}|${field}` → base kind
         const meta = new Map();    // key → {path, label, field}
@@ -308,21 +378,85 @@ export class BuilderHandler {
                 }
             }
         }
-        const wholePaths = new Set(
-            [...state.keys()].filter((k) => meta.get(k).label === null).map((k) => meta.get(k).path),
-        );
-        const out = [];
+        const wholePaths = new Set();
+        const rowKeys = new Set();
+        for (const key of state.keys()) {
+            const { path, label, field } = meta.get(key);
+            if (label === null) {
+                wholePaths.add(path);
+            } else if (field === null) {
+                rowKeys.add(`${path}|${label}`);
+            }
+        }
+        let kept = [];
         for (const [key, kind] of state) {
-            const { path, label } = meta.get(key);
+            const { path, label, field } = meta.get(key);
             // an ancestor whole-node entry renders its final subtree
             if ([...wholePaths].some((other) => other !== path && path.startsWith(`${other}.`))) {
                 continue;
             }
+            // the component's own entry covers its rows and cells
+            if (label !== null && wholePaths.has(path)) {
+                continue;
+            }
+            // the row's own entry covers its cells
+            if (field !== null && rowKeys.has(`${path}|${label}`)) {
+                continue;
+            }
+            kept.push({ kind, path, label, field });
+        }
+        // Density, cells first: too many cells of ONE row collapse into
+        // that row's replace.
+        const cellLoad = new Map();
+        for (const { path, label, field } of kept) {
+            if (field !== null) {
+                const k = `${path}|${label}`;
+                cellLoad.set(k, (cellLoad.get(k) || 0) + 1);
+            }
+        }
+        const fullRows = new Set(
+            [...cellLoad].filter(([, c]) => c > CELLS_PER_ROW_LIMIT).map(([k]) => k),
+        );
+        if (fullRows.size) {
+            kept = kept.filter(
+                ({ path, label, field }) => !(field !== null && fullRows.has(`${path}|${label}`)),
+            );
+            for (const k of fullRows) {
+                const [path, label] = k.split('|');
+                kept.push({ kind: 'upd', path, label, field: null });
+            }
+        }
+        // ...then rows: a structural flood coalesces into the container
+        // replace. CELL entries never count here.
+        const rowLoad = new Map();
+        for (const { kind, path, label, field } of kept) {
+            if (label !== null && field === null && kind !== 'page') {
+                rowLoad.set(path, (rowLoad.get(path) || 0) + 1);
+            }
+        }
+        const coalesced = new Set(
+            [...rowLoad].filter(([, c]) => c > ROW_COALESCE_LIMIT).map(([p]) => p),
+        );
+        const out = [];
+        for (const path of coalesced) {
+            out.push({ kind: 'upd', path, label: null, field: null });
+        }
+        for (const { kind, path, label, field } of kept) {
+            if (label !== null && coalesced.has(path)) {
+                continue;          // the container replace covers them all
+            }
             if (kind === 'del+ins') {
-                out.push({ kind: 'del', path, label, field: null });
-                out.push({ kind: 'ins', path, label, field: null });
+                const row = label !== null ? 'row_' : '';
+                out.push({ kind: `${row}del`, path, label, field: null });
+                out.push({ kind: `${row}ins`, path, label, field: null });
+            } else if (kind === 'page') {
+                out.push({ kind: 'page', path, label, field: null });
+            } else if (field !== null) {
+                out.push({ kind: 'cell_upd', path, label, field });
+            } else if (label !== null) {
+                out.push({ kind: `row_${kind}`, path, label, field: null });
             } else {
-                out.push({ kind, path, label, field: null });
+                out.push({ kind, path, label: null, field: null });
             }
         }
         return out;

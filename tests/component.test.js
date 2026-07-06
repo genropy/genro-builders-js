@@ -10,6 +10,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { Bag } from 'genro-bag-js';
+
 import { setupDom } from './dom.js';
 import { HtmlBuilder } from '../src/contrib/html/html-builder.js';
 import { BuilderHandler } from '../src/builder-handler.js';
@@ -111,15 +113,18 @@ test('reactivity L0: a field change inside the collection refreshes the blocks',
     assert.equal(rows[1].children[1].textContent, 'Melbourne');   // untouched row intact
 });
 
-test('reactivity L0: adding and removing a collection item adds/removes blocks', () => {
+test('reactivity: adding and removing a collection item adds/removes blocks', () => {
     setupDom();
     const root = document.createElement('div');
     const genro = new Application(root, new StatesPage('main'));
 
-    genro.live(() => {
-        genro.data.setItem('main.states.NSW.name', 'New South Wales');
-        genro.data.setItem('main.states.NSW.capital', 'Sydney');
-    });
+    // A row is born ATOMICALLY (a whole Bag): the ins event on the
+    // collection names the row → row_ins. A deep leaf-by-leaf set would
+    // classify as cell_upd on a not-yet-rendered row (CMP.7 contract).
+    const nsw = new Bag();
+    nsw.setItem('name', 'New South Wales');
+    nsw.setItem('capital', 'Sydney');
+    genro.live(() => genro.data.setItem('main.states.NSW', nsw));
     assert.equal(root.querySelectorAll('.row').length, 3);
     assert.ok(root.textContent.includes('Sydney'));
 
